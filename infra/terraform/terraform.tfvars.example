@@ -1,0 +1,5 @@
+aws_region       = "us-west-2"
+instance_name    = "debian-cpu-spin"
+instance_type    = "t3.micro"
+ssh_key_name     = "aws-demo-key"
+ssh_allowed_cidr = "<my-public-ip>/32"
