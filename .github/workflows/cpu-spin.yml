@@ -20,6 +20,8 @@ jobs:
     env:
       AWS_REGION: us-west-2
       ECR_REPOSITORY: cpu-spin
+      DEPLOY_HOST: 35.167.192.31
+      DEPLOY_USER: admin
 
     steps:
       - name: Check out repository
@@ -48,3 +50,18 @@ jobs:
 
           docker tag "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" "$REGISTRY/$ECR_REPOSITORY:latest"
           docker push "$REGISTRY/$ECR_REPOSITORY:latest"
+
+      - name: Write SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.AWS_DEMO_KEY_PEM }}
+        run: |
+          printf '%s\n' "$SSH_PRIVATE_KEY" > /tmp/aws-demo-key.pem
+          chmod 600 /tmp/aws-demo-key.pem
+
+      - name: Deploy on debian-cpu-spin
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          ssh -o StrictHostKeyChecking=no -i /tmp/aws-demo-key.pem "$DEPLOY_USER@$DEPLOY_HOST" \
+            "bash /home/admin/deploy-cpu-spin.sh $REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
