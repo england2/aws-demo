@@ -91,6 +91,7 @@ jobs:
             --instance-id "${{ steps.instance.outputs.instance_id }}"
 
       - name: Show SSM command result
+        if: always()
         run: |
           aws ssm get-command-invocation \
             --region "$AWS_REGION" \
