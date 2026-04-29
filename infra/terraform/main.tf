@@ -109,6 +109,11 @@ resource "aws_iam_role_policy" "server_ecr_pull" {
   policy = data.aws_iam_policy_document.ecr_pull.json
 }
 
+resource "aws_iam_role_policy_attachment" "server_ssm_core" {
+  role       = aws_iam_role.server.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
 resource "aws_iam_instance_profile" "server" {
   name = "${var.instance_name}-instance-profile"
   role = aws_iam_role.server.name
