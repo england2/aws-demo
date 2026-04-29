@@ -20,8 +20,7 @@ jobs:
     env:
       AWS_REGION: us-west-2
       ECR_REPOSITORY: cpu-spin
-      DEPLOY_HOST: 35.167.192.31
-      DEPLOY_USER: admin
+      DEPLOY_TARGET_TAG: debian-cpu-spin
 
     steps:
       - name: Check out repository
@@ -51,17 +50,49 @@ jobs:
           docker tag "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" "$REGISTRY/$ECR_REPOSITORY:latest"
           docker push "$REGISTRY/$ECR_REPOSITORY:latest"
 
-      - name: Write SSH key
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.AWS_DEMO_KEY_PEM }}
+      - name: Look up debian-cpu-spin instance ID
+        id: instance
         run: |
-          printf '%s\n' "$SSH_PRIVATE_KEY" > /tmp/aws-demo-key.pem
-          chmod 600 /tmp/aws-demo-key.pem
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --region "$AWS_REGION" \
+            --filters "Name=tag:Name,Values=$DEPLOY_TARGET_TAG" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[0].Instances[0].InstanceId' \
+            --output text)
 
-      - name: Deploy on debian-cpu-spin
+          if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "None" ]; then
+            echo "Could not find running instance with Name tag $DEPLOY_TARGET_TAG"
+            exit 1
+          fi
+
+          echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy on debian-cpu-spin with SSM
+        id: deploy
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          ssh -o StrictHostKeyChecking=no -i /tmp/aws-demo-key.pem "$DEPLOY_USER@$DEPLOY_HOST" \
-            "bash /home/admin/deploy-cpu-spin.sh $REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          COMMAND_ID=$(aws ssm send-command \
+            --region "$AWS_REGION" \
+            --instance-ids "${{ steps.instance.outputs.instance_id }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Deploy cpu-spin image $IMAGE_TAG" \
+            --parameters commands="bash /home/admin/deploy-cpu-spin.sh $REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" \
+            --query 'Command.CommandId' \
+            --output text)
+
+          echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for SSM command completion
+        run: |
+          aws ssm wait command-executed \
+            --region "$AWS_REGION" \
+            --command-id "${{ steps.deploy.outputs.command_id }}" \
+            --instance-id "${{ steps.instance.outputs.instance_id }}"
+
+      - name: Show SSM command result
+        run: |
+          aws ssm get-command-invocation \
+            --region "$AWS_REGION" \
+            --command-id "${{ steps.deploy.outputs.command_id }}" \
+            --instance-id "${{ steps.instance.outputs.instance_id }}"
