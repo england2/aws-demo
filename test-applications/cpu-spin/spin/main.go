@@ -27,7 +27,7 @@ func waste_cpu() {
 
 func main() {
 	if healthy {
-		fmt.Println("program is healthy!")
+		fmt.Println("Program is healthy!")
 		for {
 			time.Sleep(time.Hour)
 		}
