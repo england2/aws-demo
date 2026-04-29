@@ -37,3 +37,13 @@ output "ecr_registry_id" {
   description = "AWS registry ID that owns the ECR repository."
   value       = aws_ecr_repository.cpu_spin.registry_id
 }
+
+output "instance_role_name" {
+  description = "IAM role attached to the EC2 instance."
+  value       = aws_iam_role.server.name
+}
+
+output "instance_profile_name" {
+  description = "IAM instance profile attached to the EC2 instance."
+  value       = aws_iam_instance_profile.server.name
+}
