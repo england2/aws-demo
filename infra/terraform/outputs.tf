@@ -22,3 +22,18 @@ output "ami_id" {
   description = "AMI ID selected for the instance."
   value       = data.aws_ami.debian.id
 }
+
+output "ecr_repository_name" {
+  description = "Name of the ECR repository."
+  value       = aws_ecr_repository.cpu_spin.name
+}
+
+output "ecr_repository_url" {
+  description = "Repository URL for pushing and pulling images."
+  value       = aws_ecr_repository.cpu_spin.repository_url
+}
+
+output "ecr_registry_id" {
+  description = "AWS registry ID that owns the ECR repository."
+  value       = aws_ecr_repository.cpu_spin.registry_id
+}

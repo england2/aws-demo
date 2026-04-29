@@ -37,3 +37,27 @@ variable "debian_ami_owner" {
   type        = string
   default     = "136693071363"
 }
+
+variable "ecr_repository_name" {
+  description = "Name of the ECR repository for cpu-spin."
+  type        = string
+  default     = "cpu-spin"
+}
+
+variable "ecr_image_tag_mutability" {
+  description = "Whether image tags in ECR can be overwritten."
+  type        = string
+  default     = "MUTABLE"
+}
+
+variable "ecr_scan_on_push" {
+  description = "Whether ECR should scan images on push."
+  type        = bool
+  default     = true
+}
+
+variable "ecr_keep_image_count" {
+  description = "How many images to retain in the ECR lifecycle policy."
+  type        = number
+  default     = 10
+}
