@@ -1,2 +1,14 @@
+# ai
 .mds
 .codex
+
+# terraform
+terraform.tfvars
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+
+# wildcard
+ignore.*
