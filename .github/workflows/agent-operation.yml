@@ -1,0 +1,78 @@
+name: agent-operation
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "agent-operation/**"
+      - "infra/debian-agent-operation/inside/**"
+      - ".github/workflows/agent-operation.yml"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: us-west-2
+      DEPLOY_TARGET_TAG: debian-agent-operation
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: arn:aws:iam::204772699175:role/github-actions-ecr-push
+
+      - name: Look up debian-agent-operation instance ID
+        id: instance
+        run: |
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --region "$AWS_REGION" \
+            --filters "Name=tag:Name,Values=$DEPLOY_TARGET_TAG" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[0].Instances[0].InstanceId' \
+            --output text)
+
+          if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "None" ]; then
+            echo "Could not find running instance with Name tag $DEPLOY_TARGET_TAG"
+            exit 1
+          fi
+
+          echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy agent-operation with SSM
+        id: deploy
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --region "$AWS_REGION" \
+            --instance-ids "${{ steps.instance.outputs.instance_id }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Deploy agent-operation ${{ github.sha }}" \
+            --parameters commands="bash /home/admin/deploy-agent-operation.sh https://github.com/${{ github.repository }}.git ${{ github.sha }}" \
+            --query 'Command.CommandId' \
+            --output text)
+
+          echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for SSM command completion
+        run: |
+          aws ssm wait command-executed \
+            --region "$AWS_REGION" \
+            --command-id "${{ steps.deploy.outputs.command_id }}" \
+            --instance-id "${{ steps.instance.outputs.instance_id }}"
+
+      - name: Show SSM command result
+        if: always()
+        run: |
+          aws ssm get-command-invocation \
+            --region "$AWS_REGION" \
+            --command-id "${{ steps.deploy.outputs.command_id }}" \
+            --instance-id "${{ steps.instance.outputs.instance_id }}"
