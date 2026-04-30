@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const healthy = false
+const healthy = true
 
 func waste_cpu() {
 	spin := func() {
