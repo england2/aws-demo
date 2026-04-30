@@ -52,9 +52,12 @@ jobs:
       - name: Deploy agent-operation with SSM
         id: deploy
         run: |
-          tar -czf /tmp/agent-operation-payload.tar.gz \
-            -C agent-operation python \
-            -C infra/debian-agent-operation/inside agent-operation.service
+          rm -rf /tmp/agent-operation-payload
+          mkdir -p /tmp/agent-operation-payload
+          cp -R agent-operation/python /tmp/agent-operation-payload/python
+          rm -rf /tmp/agent-operation-payload/python/.venv
+          cp infra/debian-agent-operation/inside/agent-operation.service /tmp/agent-operation-payload/agent-operation.service
+          tar -czf /tmp/agent-operation-payload.tar.gz -C /tmp/agent-operation-payload .
 
           ARTIFACT_KEY="agent-operation/${{ github.sha }}.tar.gz"
           ARTIFACT_URI="s3://$ARTIFACT_BUCKET/$ARTIFACT_KEY"
