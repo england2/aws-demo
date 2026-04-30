@@ -77,3 +77,8 @@ output "agent_operation_instance_profile_name" {
   description = "IAM instance profile attached to the agent-operation instance."
   value       = aws_iam_instance_profile.agent_operation.name
 }
+
+output "agent_operation_artifact_bucket_name" {
+  description = "S3 bucket used to stage agent-operation deployment artifacts."
+  value       = aws_s3_bucket.agent_operation_artifacts.bucket
+}

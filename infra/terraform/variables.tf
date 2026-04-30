@@ -73,3 +73,9 @@ variable "agent_operation_instance_type" {
   type        = string
   default     = "t3.large"
 }
+
+variable "agent_operation_artifact_bucket_name" {
+  description = "S3 bucket used to stage agent-operation deployment artifacts."
+  type        = string
+  default     = "aws-demo-agent-operation-artifacts-204772699175-us-west-2"
+}

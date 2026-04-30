@@ -21,6 +21,7 @@ jobs:
     env:
       AWS_REGION: us-west-2
       DEPLOY_TARGET_TAG: debian-agent-operation
+      ARTIFACT_BUCKET: aws-demo-agent-operation-artifacts-204772699175-us-west-2
 
     steps:
       - name: Check out repository
@@ -51,12 +52,21 @@ jobs:
       - name: Deploy agent-operation with SSM
         id: deploy
         run: |
+          tar -czf /tmp/agent-operation-payload.tar.gz \
+            -C agent-operation python \
+            -C infra/debian-agent-operation/inside agent-operation.service
+
+          ARTIFACT_KEY="agent-operation/${{ github.sha }}.tar.gz"
+          ARTIFACT_URI="s3://$ARTIFACT_BUCKET/$ARTIFACT_KEY"
+
+          aws s3 cp /tmp/agent-operation-payload.tar.gz "$ARTIFACT_URI"
+
           COMMAND_ID=$(aws ssm send-command \
             --region "$AWS_REGION" \
             --instance-ids "${{ steps.instance.outputs.instance_id }}" \
             --document-name "AWS-RunShellScript" \
             --comment "Deploy agent-operation ${{ github.sha }}" \
-            --parameters commands="bash /home/admin/deploy-agent-operation.sh https://github.com/${{ github.repository }}.git ${{ github.sha }}" \
+            --parameters commands="bash /home/admin/deploy-agent-operation.sh ${{ github.sha }} $ARTIFACT_URI" \
             --query 'Command.CommandId' \
             --output text)
 

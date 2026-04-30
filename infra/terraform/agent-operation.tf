@@ -38,6 +38,23 @@ resource "aws_iam_role_policy" "agent_operation_ecr_pull" {
   policy = data.aws_iam_policy_document.ecr_pull.json
 }
 
+data "aws_iam_policy_document" "agent_operation_artifact_read" {
+  statement {
+    sid    = "ReadAgentOperationArtifacts"
+    effect = "Allow"
+    actions = [
+      "s3:GetObject",
+    ]
+    resources = ["${aws_s3_bucket.agent_operation_artifacts.arn}/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "agent_operation_artifact_read" {
+  name   = "${var.agent_operation_instance_name}-artifact-read"
+  role   = aws_iam_role.agent_operation.id
+  policy = data.aws_iam_policy_document.agent_operation_artifact_read.json
+}
+
 resource "aws_iam_role_policy_attachment" "agent_operation_ssm_core" {
   role       = aws_iam_role.agent_operation.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
