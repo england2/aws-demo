@@ -47,3 +47,33 @@ output "instance_profile_name" {
   description = "IAM instance profile attached to the EC2 instance."
   value       = aws_iam_instance_profile.server.name
 }
+
+output "agent_operation_instance_id" {
+  description = "EC2 instance ID for the agent-operation server."
+  value       = aws_instance.agent_operation.id
+}
+
+output "agent_operation_public_ip" {
+  description = "Public IP address of the agent-operation instance."
+  value       = aws_instance.agent_operation.public_ip
+}
+
+output "agent_operation_public_dns" {
+  description = "Public DNS name of the agent-operation instance."
+  value       = aws_instance.agent_operation.public_dns
+}
+
+output "agent_operation_ssh_command" {
+  description = "SSH command for the agent-operation instance."
+  value       = "ssh -i /path/to/aws-demo-key.pem admin@${aws_instance.agent_operation.public_ip}"
+}
+
+output "agent_operation_role_name" {
+  description = "IAM role attached to the agent-operation instance."
+  value       = aws_iam_role.agent_operation.name
+}
+
+output "agent_operation_instance_profile_name" {
+  description = "IAM instance profile attached to the agent-operation instance."
+  value       = aws_iam_instance_profile.agent_operation.name
+}

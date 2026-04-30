@@ -61,3 +61,15 @@ variable "ecr_keep_image_count" {
   type        = number
   default     = 10
 }
+
+variable "agent_operation_instance_name" {
+  description = "Name tag for the agent-operation EC2 instance."
+  type        = string
+  default     = "debian-agent-operation"
+}
+
+variable "agent_operation_instance_type" {
+  description = "EC2 instance type for the agent-operation server."
+  type        = string
+  default     = "t3.large"
+}
