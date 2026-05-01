@@ -1,0 +1,222 @@
+-- agent-operation SQLite schema
+--
+-- This file defines the minimum viable schema for tracking:
+-- 1. what Git SHA was deployed
+-- 2. when it was deployed
+-- 3. what runtime alerts/events were later associated with that deployment
+-- 4. whether the deployment is currently considered problematic
+--
+-- Core design choice:
+-- We do NOT try to store "variable numbers of alerts" as columns on a deployment row.
+-- That would be the wrong shape for relational data.
+--
+-- Bad shape:
+--   deployment(sha, alert_1, alert_2, alert_3, ...)
+--
+-- Good shape:
+--   deployments(id, git_sha, ...)
+--   deployment_events(id, deployment_id, ...)
+--
+-- Why this is better:
+-- - one deployment can have zero, one, or many events cleanly
+-- - event rows can store raw alert payloads without changing the schema each time
+-- - we can attach multiple alert systems later: CloudWatch, website health checks, etc.
+-- - rollback logic can ask simple questions like:
+--     "what is the most recent deployment with no problematic events?"
+--
+-- Another key design choice:
+-- Git SHA is stored as data, but it is NOT the primary key.
+--
+-- Why not use git_sha as the primary key?
+-- - the same SHA may be deployed more than once over time
+-- - later you may want to support multiple environments
+-- - it is cleaner to let each deployment be its own row with its own timestamp
+--
+-- So:
+-- - deployment_id is the row identity
+-- - git_sha is the code identity
+
+PRAGMA foreign_keys = ON;
+
+-- deployments:
+-- one row per successful deployment event
+--
+-- This row should be inserted by GitHub Actions only after the deployment step
+-- actually succeeds. GitHub Actions should not mark health; it should only record
+-- that a deployment happened.
+CREATE TABLE deployments (
+    id INTEGER PRIMARY KEY,
+
+    -- Git SHA that was deployed.
+    -- TEXT is used because SHAs are identifiers, not numbers.
+    git_sha TEXT NOT NULL,
+
+    -- Image tag used for the deployment.
+    -- In this project, this will often be the same SHA or derived from it,
+    -- but we keep it separate because the deployment mechanism uses container tags.
+    image_tag TEXT NOT NULL,
+
+    -- Optional ECR image URL used for the deployment.
+    -- Keeping the full image reference makes debugging easier later.
+    image_ref TEXT,
+
+    -- Timestamp for when the deployment was recorded.
+    -- Stored as ISO-8601 text because SQLite handles text timestamps well
+    -- and this keeps the file easy to inspect manually.
+    deployed_at TEXT NOT NULL,
+
+    -- High-level deployment status.
+    --
+    -- Expected values for now:
+    -- - deployed
+    -- - problematic
+    -- - rolled_back
+    --
+    -- This is intentionally coarse.
+    -- Detailed health/incident history belongs in deployment_events.
+    status TEXT NOT NULL DEFAULT 'deployed',
+
+    -- Whether this row is currently the active deployment.
+    -- This makes it easy for the agent-operation program to find "what is live now"
+    -- without relying only on timestamps.
+    --
+    -- Convention:
+    -- - exactly one row should normally have is_current = 1
+    -- - older rows should have is_current = 0
+    is_current INTEGER NOT NULL DEFAULT 0 CHECK (is_current IN (0, 1)),
+
+    -- Optional note for human-readable context.
+    -- Example uses:
+    -- - "recorded by github actions"
+    -- - "marked problematic by CloudWatch high CPU alert"
+    note TEXT
+);
+
+-- We will frequently ask:
+-- - what deployment is currently live?
+-- - what is the latest deployment for a given SHA?
+CREATE INDEX idx_deployments_is_current ON deployments(is_current);
+CREATE INDEX idx_deployments_git_sha ON deployments(git_sha);
+CREATE INDEX idx_deployments_deployed_at ON deployments(deployed_at);
+
+-- deployment_events:
+-- one row per runtime event/alert associated with a deployment
+--
+-- This table exists because a deployment can accumulate many events over time.
+-- It is the correct place to store alert details and raw payloads.
+CREATE TABLE deployment_events (
+    id INTEGER PRIMARY KEY,
+
+    -- Foreign key to the deployment this event is associated with.
+    deployment_id INTEGER NOT NULL,
+
+    -- Event source, e.g.:
+    -- - cloudwatch
+    -- - eventbridge
+    -- - website-check
+    -- - manual
+    source TEXT NOT NULL,
+
+    -- Machine-friendly event type, e.g.:
+    -- - high_cpu
+    -- - website_down
+    -- - healthcheck_failed
+    event_type TEXT NOT NULL,
+
+    -- Whether this event should count against deployment health.
+    -- This lets us store informational events without making the deployment "bad".
+    --
+    -- Convention:
+    -- - 1 = this event marks the deployment as problematic
+    -- - 0 = informational only
+    is_problematic INTEGER NOT NULL DEFAULT 1 CHECK (is_problematic IN (0, 1)),
+
+    -- When the alert/event was observed.
+    observed_at TEXT NOT NULL,
+
+    -- Optional external event ID from AWS or another system.
+    -- Useful for deduplication and auditability.
+    external_event_id TEXT,
+
+    -- Human-readable short summary.
+    summary TEXT,
+
+    -- Raw JSON payload from CloudWatch/EventBridge/etc.
+    --
+    -- We keep this as TEXT because SQLite does not require a dedicated JSON type.
+    -- Storing the raw payload lets us preserve source data without overfitting the schema
+    -- too early.
+    raw_payload TEXT,
+
+    FOREIGN KEY (deployment_id) REFERENCES deployments(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_deployment_events_deployment_id ON deployment_events(deployment_id);
+CREATE INDEX idx_deployment_events_external_event_id ON deployment_events(external_event_id);
+CREATE INDEX idx_deployment_events_event_type ON deployment_events(event_type);
+CREATE INDEX idx_deployment_events_observed_at ON deployment_events(observed_at);
+
+-- incidents:
+-- optional higher-level grouping for human-facing remediation work
+--
+-- This table is useful because one or more deployment events may lead to one
+-- incident summary, one rollback action, and one GitHub issue.
+--
+-- This is not strictly required for the first demo, but it fits the design well
+-- and avoids needing a future migration just to store summary/report metadata.
+CREATE TABLE incidents (
+    id INTEGER PRIMARY KEY,
+
+    -- Usually tied to the deployment that triggered the incident.
+    deployment_id INTEGER NOT NULL,
+
+    -- High-level lifecycle status for the incident itself.
+    -- Example values:
+    -- - open
+    -- - summarized
+    -- - resolved
+    status TEXT NOT NULL DEFAULT 'open',
+
+    -- Optional rollback target SHA chosen by deterministic logic.
+    rollback_target_sha TEXT,
+
+    -- Optional GitHub issue URL or identifier where the agent posted the summary.
+    github_issue_ref TEXT,
+
+    -- Agent-written or human-written summary.
+    summary TEXT,
+
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+
+    FOREIGN KEY (deployment_id) REFERENCES deployments(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_incidents_deployment_id ON incidents(deployment_id);
+CREATE INDEX idx_incidents_status ON incidents(status);
+
+-- Recommended usage rules for the application layer:
+--
+-- 1. GitHub Actions deploy succeeds:
+--    - insert one row into deployments with status='deployed'
+--    - mark previous deployment rows is_current=0
+--    - mark the new row is_current=1
+--
+-- 2. CloudWatch/EventBridge alert arrives:
+--    - find the current deployment row
+--    - insert one row into deployment_events
+--    - if the event is problematic, update deployments.status='problematic'
+--
+-- 3. Deterministic rollback happens:
+--    - choose the most recent deployment row whose status is not 'problematic'
+--    - perform rollback
+--    - optionally create/update an incidents row
+--
+-- 4. Agent writes a GitHub issue summary:
+--    - update incidents.github_issue_ref and incidents.summary
+--
+-- Why this schema is the minimum viable fit for your design:
+-- - it models deployments separately from alerts
+-- - it supports many alerts per deployment
+-- - it supports deterministic rollback based on "last non-problematic deployment"
+-- - it leaves room for GitHub issue summaries without making GitHub the source of truth

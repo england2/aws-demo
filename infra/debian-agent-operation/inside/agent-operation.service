@@ -1,0 +1,18 @@
+[Unit]
+Description=agent-operation
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=admin
+WorkingDirectory=/home/admin/agent-operation/current
+Environment=PYTHONUNBUFFERED=1
+Environment=AGENT_OPERATION_DB=/home/admin/agent-operation/data/deployments.db
+ExecStartPre=-/usr/bin/tmux kill-session -t agent-operation
+ExecStart=/usr/bin/tmux new-session -d -s agent-operation '/home/admin/agent-operation/current/.venv/bin/python /home/admin/agent-operation/current/main.py'
+ExecStop=-/usr/bin/tmux kill-session -t agent-operation
+
+[Install]
+WantedBy=multi-user.target
