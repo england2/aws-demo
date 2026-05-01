@@ -2,7 +2,7 @@ import time
 
 
 def main():
-    print("agent-operation running", flush=True)
+    print("agent-operation running...", flush=True)
 
     while True:
         time.sleep(60)
