@@ -52,6 +52,20 @@ jobs:
       - name: Deploy agent-operation with SSM
         id: deploy
         run: |
+          if [ ! -d agent-operation/python ]; then
+            echo "agent-operation/python is missing from this checkout."
+            echo "Tracked files under agent-operation:"
+            git ls-files 'agent-operation/**'
+            echo "Top-level checkout contents:"
+            find . -maxdepth 2 -type d | sort
+            exit 1
+          fi
+
+          if [ ! -f infra/debian-agent-operation/inside/agent-operation.service ]; then
+            echo "infra/debian-agent-operation/inside/agent-operation.service is missing from this checkout."
+            exit 1
+          fi
+
           rm -rf /tmp/agent-operation-payload
           mkdir -p /tmp/agent-operation-payload
           cp -R agent-operation/python /tmp/agent-operation-payload/python
@@ -83,7 +97,7 @@ jobs:
             --instance-id "${{ steps.instance.outputs.instance_id }}"
 
       - name: Show SSM command result
-        if: always()
+        if: ${{ always() && steps.deploy.outputs.command_id != '' }}
         run: |
           aws ssm get-command-invocation \
             --region "$AWS_REGION" \
