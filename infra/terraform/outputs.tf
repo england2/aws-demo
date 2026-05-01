@@ -82,3 +82,18 @@ output "agent_operation_artifact_bucket_name" {
   description = "S3 bucket used to stage agent-operation deployment artifacts."
   value       = aws_s3_bucket.agent_operation_artifacts.bucket
 }
+
+output "agent_operation_events_queue_name" {
+  description = "SQS queue name for agent-operation runtime events."
+  value       = aws_sqs_queue.agent_operation_events.name
+}
+
+output "agent_operation_events_queue_url" {
+  description = "SQS queue URL for agent-operation runtime events."
+  value       = aws_sqs_queue.agent_operation_events.url
+}
+
+output "agent_operation_events_queue_arn" {
+  description = "SQS queue ARN for agent-operation runtime events."
+  value       = aws_sqs_queue.agent_operation_events.arn
+}
