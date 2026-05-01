@@ -4,4 +4,6 @@ version = "0.1.0"
 description = "Run agents to respond to AWS events"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "boto3>=1.43.1",
+]
