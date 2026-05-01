@@ -47,8 +47,8 @@ def start_codex_agent(agent_dir: Path) -> subprocess.Popen:
     return subprocess.Popen(
         [
             "codex",
-            "--skip-git-repo-check",
             "exec",
+            "--skip-git-repo-check",
             "read AGENTS.md and carry out the instructions",
         ],
         cwd=agent_dir,
