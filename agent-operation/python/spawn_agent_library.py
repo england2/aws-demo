@@ -19,9 +19,19 @@ def copy_agent_context(operation_name: str, agent_dir: Path) -> Path:
     return target_context_dir
 
 
-def new_agent_dir(operation_name: str) -> Path:
+def write_alert_file(agent_dir: Path, alert_file: Path | None = None) -> Path | None:
+    if alert_file is None:
+        return None
+
+    target_alert_file = agent_dir / "alert.txt"
+    shutil.copyfile(alert_file, target_alert_file)
+    return target_alert_file
+
+
+def new_agent_dir(operation_name: str, alert_file: Path | None = None) -> Path:
     timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S-%f")
     agent_dir = AGENT_WORK_ROOT / f"{timestamp}-{operation_name}"
     agent_dir.mkdir(parents=True, exist_ok=False)
     copy_agent_context(operation_name, agent_dir)
+    write_alert_file(agent_dir, alert_file)
     return agent_dir

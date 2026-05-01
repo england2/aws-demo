@@ -1,4 +1,5 @@
 import os
+import json
 import shlex
 import subprocess
 import sys
@@ -8,6 +9,7 @@ from pathlib import Path
 PYTHON_ROOT = Path(__file__).resolve().parent
 OPERATIONS_ROOT = PYTHON_ROOT / "operations"
 DEFAULT_TMUX_SESSION = os.environ.get("AGENT_OPERATION_TMUX_SESSION", "agent-operation")
+ALERT_STAGING_ROOT = Path(os.environ.get("AGENT_OPERATION_ALERT_STAGING_ROOT", "/tmp/agent-operation-alerts"))
 
 
 def discover_operation_paths() -> dict[str, Path]:
@@ -33,23 +35,34 @@ def operation_window_name(operation_name: str) -> str:
     return f"agent-{operation_name}"[:20]
 
 
-def command_for_operation(operation_path: Path) -> str:
-    python_executable = Path(sys.executable)
+def stage_alert(operation_name: str, alert: dict) -> Path:
+    ALERT_STAGING_ROOT.mkdir(parents=True, exist_ok=True)
+    event_id = alert.get("id", "unknown-event")
+    alert_file = ALERT_STAGING_ROOT / f"{event_id}-{operation_name}.json"
+    alert_file.write_text(json.dumps(alert, indent=2, sort_keys=True))
+    return alert_file
 
-    return " ".join(
-        [
-            "cd",
-            shlex.quote(str(PYTHON_ROOT)),
-            "&&",
-            "PYTHONPATH=" + shlex.quote(str(PYTHON_ROOT)),
-            shlex.quote(str(python_executable)),
-            shlex.quote(str(operation_path)),
-        ]
-    )
+
+def command_for_operation(operation_path: Path, alert_file: Path | None = None) -> str:
+    python_executable = Path(sys.executable)
+    command_parts = [
+        "cd",
+        shlex.quote(str(PYTHON_ROOT)),
+        "&&",
+        "PYTHONPATH=" + shlex.quote(str(PYTHON_ROOT)),
+        shlex.quote(str(python_executable)),
+        shlex.quote(str(operation_path)),
+    ]
+
+    if alert_file is not None:
+        command_parts.append(shlex.quote(str(alert_file)))
+
+    return " ".join(command_parts)
 
 
 def start_agent_operation(
     operation_name: str,
+    alert: dict | None = None,
     tmux_session: str = DEFAULT_TMUX_SESSION,
 ) -> None:
     operation_path = discover_operation_paths().get(operation_name)
@@ -60,6 +73,8 @@ def start_agent_operation(
     if not operation_path.exists():
         raise FileNotFoundError(operation_path)
 
+    alert_file = stage_alert(operation_name, alert) if alert is not None else None
+
     subprocess.run(
         [
             "tmux",
@@ -68,7 +83,7 @@ def start_agent_operation(
             tmux_session,
             "-n",
             operation_window_name(operation_name),
-            command_for_operation(operation_path),
+            command_for_operation(operation_path, alert_file),
         ],
         check=True,
     )

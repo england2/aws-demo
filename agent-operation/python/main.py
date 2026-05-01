@@ -87,7 +87,7 @@ def handle_message(event: dict) -> None:
             f"operation_name={operation.operation_name} "
             f"reason={reason}"
         )
-        start_agent_operation(operation.operation_name)
+        start_agent_operation(operation.operation_name, alert=event)
 
     mark_message_seen(event_id)
 
