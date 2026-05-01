@@ -1,6 +1,6 @@
 resource "aws_cloudwatch_metric_alarm" "cpu_spin_high_cpu" {
   alarm_name          = "debian-cpu-spin-high-cpu"
-  alarm_description   = "Triggers when debian-cpu-spin CPU is above 70 percent for 1 minute"
+  alarm_description   = "Triggers when debian-cpu-spin average CPU is above 20 percent for one 20-second period"
   comparison_operator = "GreaterThanThreshold"
   # the number of windows/periods that must breach the threshold for an alert to occur
   evaluation_periods = 1
