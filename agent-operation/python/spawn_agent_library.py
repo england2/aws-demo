@@ -1,4 +1,5 @@
 import shutil
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -16,6 +17,11 @@ def copy_agent_context(operation_name: str, agent_dir: Path) -> Path:
         raise FileNotFoundError(source_context_dir)
 
     shutil.copytree(source_context_dir, target_context_dir)
+
+    source_agents_file = target_context_dir / "AGENTS.md"
+    if source_agents_file.exists():
+        shutil.copyfile(source_agents_file, agent_dir / "AGENTS.md")
+
     return target_context_dir
 
 
@@ -35,3 +41,15 @@ def new_agent_dir(operation_name: str, alert_file: Path | None = None) -> Path:
     copy_agent_context(operation_name, agent_dir)
     write_alert_file(agent_dir, alert_file)
     return agent_dir
+
+
+def start_codex_agent(agent_dir: Path) -> subprocess.Popen:
+    return subprocess.Popen(
+        [
+            "codex",
+            "--skip-git-repo-check",
+            "exec",
+            "read AGENTS.md and carry out the instructions",
+        ],
+        cwd=agent_dir,
+    )
