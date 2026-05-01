@@ -1,0 +1,5 @@
+services:
+  cpu-spin:
+    image: ${CPU_SPIN_IMAGE}
+    container_name: cpu-spin
+    restart: unless-stopped
