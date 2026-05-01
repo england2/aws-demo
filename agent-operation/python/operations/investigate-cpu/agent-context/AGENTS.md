@@ -4,6 +4,17 @@ You are responding to an AWS CloudWatch CPU alarm for the `debian-cpu-spin` EC2 
 
 Your objective is to create a small, reviewable GitHub pull request that fixes the CPU-spinning behavior in the source code.
 
+## Execution Context
+
+- You are a headless agent running on an EC2 server.
+- There is no human waiting to answer follow-up questions.
+- Do not pause for user confirmation.
+- Do not ask the user what to do next.
+- Make reasonable assumptions from `alert.txt`, this file, and the repository contents.
+- If something is ambiguous, choose the smallest safe action that advances the PR objective and document the assumption in the PR body.
+- If a command fails, diagnose and try a reasonable fix.
+- If the task cannot be completed, leave a clear written failure summary in the working directory before exiting.
+
 ## Required Inputs
 
 - Read `alert.txt` first.
