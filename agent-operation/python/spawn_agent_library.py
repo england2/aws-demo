@@ -49,6 +49,7 @@ def start_codex_agent(agent_dir: Path) -> subprocess.Popen:
             "codex",
             "exec",
             "--skip-git-repo-check",
+            "--dangerously-bypass-approvals-and-sandbox",
             "read AGENTS.md and carry out the instructions",
         ],
         cwd=agent_dir,
