@@ -2,6 +2,9 @@
 .mds
 .codex
 
+# python
+**/.venv/
+
 # terraform
 terraform.tfvars
 .terraform/
