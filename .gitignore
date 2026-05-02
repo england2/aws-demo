@@ -17,3 +17,6 @@ crash.log
 
 # wildcard
 ignore.*
+
+# keep documentation files
+!*.docs.md
