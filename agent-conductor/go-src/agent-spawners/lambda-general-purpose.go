@@ -8,35 +8,32 @@ import (
 
 type LambdaGeneralPurposeAgent struct{}
 
-func (a LambdaGeneralPurposeAgent) Name() string {
-	return "general-purpose-lambda"
+func (a LambdaGeneralPurposeAgent) Spec() lib.AgentSpawnerSpec {
+	return lib.AgentSpawnerSpec{
+		Name:        "general-purpose-lambda",
+		Description: "General purpose Lambda-backed agent spawner.",
+	}
 }
 
-// TODO configure to NOT run on any tickets that failed previously
-
-// implementing the DecideRunSQSMessage
-//
-// ai-- this function should:
-// - start with an empty JobPoints struct
-// - if we match with the cpu spin alert, we will add 1 job points, with the reason "Matched with 'debian-cpu-spin-high-cpu' CloudWatch alert"
-//
-//
 func (a LambdaGeneralPurposeAgent) DecideRunSQSMessage(message lib.SQSMessage) (lib.AgentMatch, error) {
+	match := lib.AgentMatch{
+		AgentSpawnerName: a.Spec().Name,
+	}
+
 	var event lib.CloudWatchAlarmEvent
 	if err := json.Unmarshal(message.Body, &event); err != nil {
-		return lib.AgentMatch{}, nil
+		return match, nil
 	}
 
 	if event.Source != "aws.cloudwatch" || event.DetailType != "CloudWatch Alarm State Change" {
-		return lib.AgentMatch{}, nil
+		return match, nil
 	}
 
 	if event.Detail.AlarmName != "debian-cpu-spin-high-cpu" || event.Detail.State.Value != "ALARM" {
-		return lib.AgentMatch{}, nil
+		return match, nil
 	}
 
-	return lib.AgentMatch{
-		AgentName:   a.Name(),
-		JobPriority: 100,
-	}, nil
+	match.AddJobPoint(1, "Matched with 'debian-cpu-spin-high-cpu' CloudWatch alert")
+
+	return match, nil
 }

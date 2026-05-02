@@ -34,14 +34,14 @@ func main() {
 func agentSpawnersDecideRunSQSMessage(message lib.SQSMessage) {
 	matches := []lib.AgentMatch{}
 
-	for _, agent := range agentspawners.All() {
+	for _, agent := range registeredAgentSpawners() {
 		match, err := agent.DecideRunSQSMessage(message)
 		if err != nil {
-			fmt.Printf("agent parser error: agent=%s message_id=%s error=%v\n", agent.Name(), message.MessageID, err)
+			fmt.Printf("agent parser error: agent=%s message_id=%s error=%v\n", agent.Spec().Name, message.MessageID, err)
 			continue
 		}
 
-		if match.JobPriority > 0 {
+		if match.TotalPoints() > 0 {
 			matches = append(matches, match)
 		}
 	}
@@ -50,8 +50,14 @@ func agentSpawnersDecideRunSQSMessage(message lib.SQSMessage) {
 	case 0:
 		fmt.Printf("no agent matched sqs message: %s\n", message.MessageID)
 	case 1:
-		fmt.Printf("selected agent: message_id=%s agent=%s priority=%d\n", message.MessageID, matches[0].AgentName, matches[0].JobPriority)
+		fmt.Printf("selected agent: message_id=%s agent=%s points=%d\n", message.MessageID, matches[0].AgentSpawnerName, matches[0].TotalPoints())
 	default:
 		fmt.Printf("ambiguous agent match: message_id=%s matches=%d\n", message.MessageID, len(matches))
+	}
+}
+
+func registeredAgentSpawners() []lib.AgentSpawner {
+	return []lib.AgentSpawner{
+		agentspawners.LambdaGeneralPurposeAgent{},
 	}
 }

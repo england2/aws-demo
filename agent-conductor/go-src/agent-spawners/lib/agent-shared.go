@@ -1,6 +1,11 @@
 package lib
 
-// agent-shared.go: interface and shared structs for a variety of agent definitions
+import (
+	"context"
+	"time"
+)
+
+// agent-shared.go: interface and shared structs for agent-spawner definitions.
 
 type SQSMessage struct {
 	MessageID     string
@@ -9,31 +14,53 @@ type SQSMessage struct {
 	RawBody       string
 }
 
-
-// ai-- everytime an agent scores points during DecideRunSQSMessage, we add a JobPoint struct to AgentMatch
-// this struct contains a points integer in addition to the reason why we added the point. this helps with observability into why an agent spawned!
 // PointReason will be "read only", and every time we run  be defined inline in the DecideRunSQSMessage message
 type JobPoint struct {
-	int Points
-	string PointReason
+	Points      int
+	PointReason string
 }
 
 type AgentMatch struct {
-	AgentName string
-	// ArrJobPoints: the "score" that an agent-spawner uses to compete with other agent-spawners if
-	// they are both fit for a single job.
-	//
-	//
-	// this is useful for if we have multiple agents that are fit to run a job, but we only want a single agent to run on it
-	// the job of the function DecideRunSQSMessage is to increase JobPriority.
-	//
-	// we will register multiple agents. my plan is that
-	ArrJobPoints []JobPoints
+	AgentSpawnerName string
+	// JobPoints is the score explanation an agent-spawner uses to compete with
+	// other agent-spawners when multiple want to handle a job
+	JobPoints []JobPoint
 }
 
+func (m *AgentMatch) AddJobPoint(points int, reason string) {
+	m.JobPoints = append(m.JobPoints, JobPoint{
+		Points:      points,
+		PointReason: reason,
+	})
+}
 
-type AgentDefinition interface {
-	Name() string
-	// DecideRunSQSMessage: this function consumes a message of any shape from the main SQS queue. Throughout the function body, the agent-spawner will have custom logic that gives it more points.
+func (m AgentMatch) TotalPoints() int {
+	total := 0
+	for _, point := range m.JobPoints {
+		total += point.Points
+	}
+
+	return total
+}
+
+type SpawnedAgent struct {
+	JobID     int64
+	AgentName string
+	RuntimeID string
+	// EventStream and AgentEvents will be read from by a consumer at one point
+	EventStream <-chan AgentEvent
+	Cancel      context.CancelFunc
+	StartedAt   time.Time
+}
+
+type AgentSpawnerSpec struct {
+	Name        string
+	Description string
+}
+
+type AgentSpawner interface {
+	Spec() AgentSpawnerSpec
+	// DecideRunSQSMessage consumes a message from the shared SQS queue and returns
+	// a scored match when this spawner is a candidate to handle it.
 	DecideRunSQSMessage(message SQSMessage) (AgentMatch, error)
 }
