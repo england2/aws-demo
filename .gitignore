@@ -1,6 +1,7 @@
 # ai
 .mds
 .codex
+*.md
 
 # python
 **/.venv/
