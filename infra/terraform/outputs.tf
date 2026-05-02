@@ -38,6 +38,16 @@ output "ecr_registry_id" {
   value       = aws_ecr_repository.cpu_spin.registry_id
 }
 
+output "agent_lambda_ecr_repository_name" {
+  description = "Name of the ECR repository for the agent Lambda image."
+  value       = aws_ecr_repository.agent_lambda.name
+}
+
+output "agent_lambda_ecr_repository_url" {
+  description = "Repository URL for pushing and pulling the agent Lambda image."
+  value       = aws_ecr_repository.agent_lambda.repository_url
+}
+
 output "instance_role_name" {
   description = "IAM role attached to the EC2 instance."
   value       = aws_iam_role.server.name
