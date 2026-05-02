@@ -79,6 +79,11 @@ resource "aws_instance" "agent_operation" {
     volume_type = "gp3"
   }
 
+  lifecycle {
+    # Avoid replacing this stateful demo server when the Debian AMI lookup changes.
+    ignore_changes = [ami]
+  }
+
   tags = {
     Name = var.agent_operation_instance_name
   }

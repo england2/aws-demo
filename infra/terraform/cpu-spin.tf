@@ -97,6 +97,11 @@ resource "aws_instance" "server" {
     volume_type = "gp3"
   }
 
+  lifecycle {
+    # Avoid replacing this stateful demo server when the Debian AMI lookup changes.
+    ignore_changes = [ami]
+  }
+
   tags = {
     Name = var.instance_name
   }
