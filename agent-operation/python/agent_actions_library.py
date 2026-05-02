@@ -6,7 +6,9 @@ import subprocess
 from pathlib import Path
 
 
-def run_command(command: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
+def run_command(
+    command: list[str], cwd: Path | None = None
+) -> subprocess.CompletedProcess:
     return subprocess.run(
         command,
         cwd=cwd,

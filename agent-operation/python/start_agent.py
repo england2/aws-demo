@@ -9,7 +9,9 @@ from pathlib import Path
 PYTHON_ROOT = Path(__file__).resolve().parent
 OPERATIONS_ROOT = PYTHON_ROOT / "operations"
 DEFAULT_TMUX_SESSION = os.environ.get("AGENT_OPERATION_TMUX_SESSION", "agent-operation")
-ALERT_STAGING_ROOT = Path(os.environ.get("AGENT_OPERATION_ALERT_STAGING_ROOT", "/tmp/agent-operation-alerts"))
+ALERT_STAGING_ROOT = Path(
+    os.environ.get("AGENT_OPERATION_ALERT_STAGING_ROOT", "/tmp/agent-operation-alerts")
+)
 
 
 def discover_operation_paths() -> dict[str, Path]:
