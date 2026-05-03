@@ -25,6 +25,10 @@ WORKDIR /home/root/bootstrap/
 COPY inside-container/bootstrap/ ./
 COPY inside-container/work/ /home/root/work/
 
+
+# directory structure
+RUN mkdir /tmp/agent-meta/
+
 # install codex and runtime deps
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl git ncurses-bin nodejs npm tar \
