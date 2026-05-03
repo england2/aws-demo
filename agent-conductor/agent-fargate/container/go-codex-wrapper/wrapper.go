@@ -46,6 +46,7 @@ func StartCodexCLIWrapper(config CodexCLIWrapper) (*CodexCLIProcess, error) {
 		"codex",
 		"exec",
 		"--skip-git-repo-check",
+		"--dangerously-bypass-approvals-and-sandbox",
 		config.Prompt,
 	}
 
