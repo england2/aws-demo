@@ -1,7 +1,6 @@
 # ai
 .mds
 .codex
-*.md
 
 # python
 **/.venv/
@@ -18,5 +17,5 @@ crash.log
 # wildcard
 ignore.*
 
-# keep documentation files
+# keep documentation files, (p) real md files
 !*.docs.md
