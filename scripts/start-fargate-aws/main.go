@@ -176,7 +176,7 @@ func loadSettings() (settings, error) {
 		SecurityGroupName: envDefault("AGENT_FARGATE_SECURITY_GROUP_NAME", defaultSecurityGroupName),
 		TaskRoleName:      envDefault("AGENT_FARGATE_TASK_ROLE_NAME", defaultTaskRoleName),
 		ExecutionRoleName: envDefault("AGENT_FARGATE_EXECUTION_ROLE_NAME", defaultExecutionRoleName),
-		StatePath:         expandHome(envDefault("AGENT_FARGATE_STATE_PATH", filepath.Join(home, "programming", "aws1", "scripts", "current-test-fargate.txt")), home),
+		StatePath:         expandHome(envDefault("AGENT_FARGATE_STATE_PATH", filepath.Join(home, "programming", "aws1", "scripts", "ignore.current-test-fargate.txt")), home),
 	}, nil
 }
 
