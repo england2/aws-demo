@@ -1,7 +1,6 @@
 package main
 
 import (
-	"codex-wrapper/tools"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,21 +22,53 @@ func write_start_time() {
 	}
 }
 
+var OPENAI_API_KEY string
+
 func main() {
-	write_start_time()
-
 	registerBuiltinTools()
-
 	if len(os.Args) > 1 && runToolArgument(os.Args[1]) {
 		return
 	}
 
-	for i := 1; i <= 20; i++ {
-		fmt.Println(i)
-		if i != 10 {
-			time.Sleep(1 * time.Second)
-		}
+	// gaurd against the agent accidentally spawning another codex-wrapper by calling the binary directly.
+	if os.Getenv("START_AGENT_ALLOWED") != "true" {
+		fmt.Fprintln(os.Stderr, "Incorrect tool envokation! do `codex-wrapper -- <toolname>`")
+		os.Exit(1)
 	}
 
-	tools.Ending()
+	// setup
+	write_start_time()
+	OPENAI_API_KEY = get_openai_key()
+	if err := codex_login(OPENAI_API_KEY); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+
+	// hide the start guard from the agent so accidental no-arg tool calls cannot spawn nested agents
+	if err := os.Unsetenv("START_AGENT_ALLOWED"); err != nil {
+		fmt.Fprintf(os.Stderr, "unset START_AGENT_ALLOWED: %v\n", err)
+		os.Exit(1)
+	}
+
+	// start the agent!
+	process, err := StartCodexCLIWrapper(CodexCLIWrapper{
+		SessionName: "agent-codex",
+		WorkingDir:  "/home/root/work",
+		OpenAIKey:   OPENAI_API_KEY,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+
+	go func() {
+		for chunk := range process.Output {
+			fmt.Print(chunk)
+		}
+	}()
+
+	if err := <-process.Done; err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
 }
