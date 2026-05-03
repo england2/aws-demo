@@ -1,17 +1,25 @@
 package main
 
 import (
+	"codex-wrapper/tools"
 	"fmt"
+	"os"
 	"time"
 )
 
 func main() {
-	for i := 1; i <= 30; i++ {
+	registerBuiltinTools()
+
+	if len(os.Args) > 1 && runToolArgument(os.Args[1]) {
+		return
+	}
+
+	for i := 1; i <= 20; i++ {
 		fmt.Println(i)
 		if i != 10 {
 			time.Sleep(1 * time.Second)
 		}
 	}
 
-	ending()
+	tools.Ending()
 }
