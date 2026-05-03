@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "agent-conductor/agent-fargate/**"
+      - "agent-conductor/shared/agentproto/**"
       - ".github/workflows/agent-fargate.yml"
   workflow_dispatch:
 
@@ -49,4 +50,5 @@ jobs:
             -t "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" \
             -t "$REGISTRY/$ECR_REPOSITORY:latest" \
             --push \
-            agent-conductor/agent-fargate/container
+            -f agent-conductor/agent-fargate/container/Dockerfile \
+            .
