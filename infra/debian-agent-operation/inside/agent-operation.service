@@ -8,12 +8,11 @@ Type=oneshot
 RemainAfterExit=yes
 User=admin
 WorkingDirectory=/home/admin/agent-operation/current
-Environment=PYTHONUNBUFFERED=1
 Environment=AGENT_OPERATION_DB=/home/admin/agent-operation/data/deployments.db
 Environment=AGENT_OPERATION_QUEUE_URL=https://sqs.us-west-2.amazonaws.com/204772699175/agent-operation-events
 Environment=AGENT_OPERATION_SEEN_MESSAGES=/home/admin/seen-messages.txt
 ExecStartPre=-/usr/bin/tmux kill-session -t agent-operation
-ExecStart=/usr/bin/tmux new-session -d -s agent-operation '/home/admin/agent-operation/current/.venv/bin/python /home/admin/agent-operation/current/main.py'
+ExecStart=/usr/bin/tmux new-session -d -s agent-operation '/home/admin/agent-operation/current/agent-conductor'
 ExecStop=-/usr/bin/tmux kill-session -t agent-operation
 
 [Install]
