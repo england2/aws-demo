@@ -11,10 +11,10 @@ ARG TARGETARCH
 
 WORKDIR /src
 
-COPY agent-fargate/container/go-codex-wrapper/go.mod agent-fargate/container/go-codex-wrapper/go.sum ./
-COPY shared/agentproto/ /shared/agentproto/
-COPY agent-fargate/container/go-codex-wrapper/*.go ./
-COPY agent-fargate/container/go-codex-wrapper/tools/ ./tools/
+COPY agent-conductor/agent-fargate/container/go-codex-wrapper/go.mod agent-conductor/agent-fargate/container/go-codex-wrapper/go.sum ./
+COPY agent-conductor/shared/agentproto/ /shared/agentproto/
+COPY agent-conductor/agent-fargate/container/go-codex-wrapper/*.go ./
+COPY agent-conductor/agent-fargate/container/go-codex-wrapper/tools/ ./tools/
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -o /out/codex-wrapper .
 
@@ -30,8 +30,8 @@ ENV GOPATH=/root/go
 ENV START_AGENT_ALLOWED=true
 
 WORKDIR /home/root/bootstrap/
-COPY agent-fargate/container/inside-container/work/ /home/root/work/
-COPY agent-fargate/container/inside-container/bootstrap/ ./
+COPY agent-conductor/agent-fargate/container/inside-container/work/ /home/root/work/
+COPY agent-conductor/agent-fargate/container/inside-container/bootstrap/ ./
 
 # directory structure
 RUN mkdir /tmp/agent-meta/
@@ -68,7 +68,6 @@ RUN bash ./go.sh --version 1.26.2
 
 COPY --from=build /out/codex-wrapper /usr/local/bin/codex-wrapper
 
-RUN rm -rf agent-fargate/container/inside-container/bootstrap/
 WORKDIR /home/root/work/
 
 ENTRYPOINT ["/usr/local/bin/codex-wrapper"]
