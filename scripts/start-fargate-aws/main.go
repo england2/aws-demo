@@ -119,7 +119,8 @@ func main() {
 		fatal(err)
 	}
 
-	connectCommand := fmt.Sprintf("scripts/connect-fargate-aws.fish")
+	connectCommand := fmt.Sprintf("scripts/current-agent-farget-connect.fish")
+
 	if err := writeState(settings.StatePath, map[string]string{
 		"region":              settings.Region,
 		"cluster":             settings.Cluster,
