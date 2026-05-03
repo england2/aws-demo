@@ -9,7 +9,11 @@ const (
 	AgentJobStatusRunning   AgentJobStatus = "running"
 	AgentJobStatusSucceeded AgentJobStatus = "succeeded"
 	AgentJobStatusFailed    AgentJobStatus = "failed"
+	AgentJobStatusIgnored   AgentJobStatus = "ignored"
+	AgentJobStatusDuplicate AgentJobStatus = "duplicate"
 )
+
+const databaseDir = "database"
 
 type DatabaseSQSMessageInfo struct {
 	ID                 int64
@@ -20,6 +24,7 @@ type DatabaseSQSMessageInfo struct {
 	RawBody            string
 	MessageType        string
 	AssignedAgentJobID *int64
+	JobStatus          *AgentJobStatus
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }

@@ -1,0 +1,243 @@
+package main
+
+import (
+	"database/sql"
+	_ "embed"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	_ "modernc.org/sqlite"
+)
+
+//go:embed database.sql
+var db_init string
+
+var db_path string
+
+func check_load_db() error {
+	if err := os.MkdirAll(databaseDir, 0755); err != nil {
+		return fmt.Errorf("create database dir: %w", err)
+	}
+
+	init_db := func() error {
+		newPath := filepath.Join(databaseDir, fmt.Sprintf("database-%d.sqlite", time.Now().Unix()))
+		db, err := sql.Open("sqlite", newPath)
+		if err != nil {
+			return fmt.Errorf("open new database: %w", err)
+		}
+		defer db.Close()
+
+		if _, err := db.Exec(db_init); err != nil {
+			return fmt.Errorf("initialize new database %s: %w", newPath, err)
+		}
+
+		db_path = newPath
+		return nil
+	}
+
+	path, ok, err := newestDatabasePath(databaseDir)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return init_db()
+	}
+
+	db_path = path
+
+	if err := validateDatabase(db_path); err != nil {
+		return init_db()
+	}
+
+	return nil
+}
+
+func newestDatabasePath(dir string) (string, bool, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", false, fmt.Errorf("read database dir: %w", err)
+	}
+
+	var candidates []os.FileInfo
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		name := entry.Name()
+		if name != "database.sqlite" && !(strings.HasPrefix(name, "database-") && strings.HasSuffix(name, ".sqlite")) {
+			continue
+		}
+
+		info, err := entry.Info()
+		if err != nil {
+			return "", false, fmt.Errorf("stat database candidate %s: %w", name, err)
+		}
+
+		candidates = append(candidates, info)
+	}
+
+	if len(candidates) == 0 {
+		return "", false, nil
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].ModTime().After(candidates[j].ModTime())
+	})
+
+	return filepath.Join(dir, candidates[0].Name()), true, nil
+}
+
+func validateDatabase(path string) error {
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return fmt.Errorf("open database %s: %w", path, err)
+	}
+	defer db.Close()
+
+	if err := db.Ping(); err != nil {
+		return fmt.Errorf("ping database %s: %w", path, err)
+	}
+
+	requiredTables := []string{"sqs_message", "agent_job_info"}
+	for _, table := range requiredTables {
+		var count int
+		err := db.QueryRow(
+			`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`,
+			table,
+		).Scan(&count)
+		if err != nil {
+			return fmt.Errorf("check table %s: %w", table, err)
+		}
+		if count != 1 {
+			return fmt.Errorf("missing table %s", table)
+		}
+	}
+
+	if err := validateSQSMessageShape(db); err != nil {
+		return err
+	}
+	if err := validateAgentJobShape(db); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func validateSQSMessageShape(db *sql.DB) error {
+	rows, err := db.Query(`
+		SELECT
+			id,
+			external_message_id,
+			receipt_handle,
+			external_event_id,
+			raw_body,
+			message_type,
+			assigned_agent_job_id,
+			job_status,
+			created_at,
+			updated_at
+		FROM sqs_message
+		LIMIT 1
+	`)
+	if err != nil {
+		return fmt.Errorf("validate sqs_message shape: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			id                 int64
+			externalMessageID  string
+			receiptHandle      string
+			externalEventID    sql.NullString
+			rawBody            string
+			messageType        string
+			assignedAgentJobID sql.NullInt64
+			jobStatus          sql.NullString
+			createdAt          string
+			updatedAt          string
+		)
+
+		if err := rows.Scan(
+			&id,
+			&externalMessageID,
+			&receiptHandle,
+			&externalEventID,
+			&rawBody,
+			&messageType,
+			&assignedAgentJobID,
+			&jobStatus,
+			&createdAt,
+			&updatedAt,
+		); err != nil {
+			return fmt.Errorf("deserialize sqs_message sample: %w", err)
+		}
+	}
+
+	return rows.Err()
+}
+
+func validateAgentJobShape(db *sql.DB) error {
+	rows, err := db.Query(`
+		SELECT
+			id,
+			agent_name,
+			status,
+			spawn_sqs_message_id,
+			agent_report,
+			affected_repositories,
+			pull_request_url,
+			failure_reason,
+			created_at,
+			started_at,
+			completed_at,
+			updated_at
+		FROM agent_job_info
+		LIMIT 1
+	`)
+	if err != nil {
+		return fmt.Errorf("validate agent_job_info shape: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			id                int64
+			agentName         string
+			status            string
+			spawnSQSMessageID int64
+			agentReport       sql.NullString
+			affectedRepos     sql.NullString
+			pullRequestURL    sql.NullString
+			failureReason     sql.NullString
+			createdAt         string
+			startedAt         sql.NullString
+			completedAt       sql.NullString
+			updatedAt         string
+		)
+
+		if err := rows.Scan(
+			&id,
+			&agentName,
+			&status,
+			&spawnSQSMessageID,
+			&agentReport,
+			&affectedRepos,
+			&pullRequestURL,
+			&failureReason,
+			&createdAt,
+			&startedAt,
+			&completedAt,
+			&updatedAt,
+		); err != nil {
+			return fmt.Errorf("deserialize agent_job_info sample: %w", err)
+		}
+	}
+
+	return rows.Err()
+}
