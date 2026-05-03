@@ -13,6 +13,7 @@ var toolRegistry = map[string]ToolFunc{}
 
 func registerBuiltinTools() {
 	register_tool("ending", tools.Ending)
+	register_tool("check-time", tools.CheckTime)
 }
 
 func register_tool(name string, tool ToolFunc) {
