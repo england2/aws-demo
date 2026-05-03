@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ -z "${OPENAI_API_KEY:-}" ]]; then
-	OPENAI_API_KEY="$(get-secrets --openai_api_key)"
+	OPENAI_API_KEY="$(get-secrets --openai_api_key | jq -r '.OPENAI_API_KEY')"
 	export OPENAI_API_KEY
 fi
 
