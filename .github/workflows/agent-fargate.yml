@@ -1,12 +1,12 @@
-name: agent-lambda
+name: agent-fargate
 
 on:
   push:
     branches:
       - main
     paths:
-      - "agent-conductor/agent-lambda/**"
-      - ".github/workflows/agent-lambda.yml"
+      - "agent-conductor/agent-fargate/**"
+      - ".github/workflows/agent-fargate.yml"
   workflow_dispatch:
 
 permissions:
@@ -20,7 +20,7 @@ jobs:
 
     env:
       AWS_REGION: us-west-2
-      ECR_REPOSITORY: agent-lambda
+      ECR_REPOSITORY: agent-fargate
 
     steps:
       - name: Check out repository
@@ -49,4 +49,4 @@ jobs:
             -t "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" \
             -t "$REGISTRY/$ECR_REPOSITORY:latest" \
             --push \
-            agent-conductor/agent-lambda/container
+            agent-conductor/agent-fargate/container
