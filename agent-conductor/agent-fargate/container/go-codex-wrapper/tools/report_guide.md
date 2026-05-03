@@ -71,7 +71,7 @@ List unresolved problems, assumptions, incomplete work, fragile areas, or anythi
 Include relevant details from the agent's execution, especially:
 
 - Commands that failed or produced surprising output.
-- Error messages, stack traces, timeout symptoms, or AWS Lambda runtime constraints.
+- Error messages, stack traces, timeout symptoms, or AWS Fargate runtime constraints.
 - Missing environment variables, credentials, permissions, files, packages, or network access.
 - Conflicting or ambiguous user requirements.
 - Tooling limitations, unavailable dependencies, incompatible versions, or filesystem restrictions.
@@ -109,7 +109,7 @@ Example:
 Outcome: Succeeded.
 
 Work completed:
-- Added final report generation for the Lambda coding agent.
+- Added final report generation for the Fargate coding agent.
 - Documented friction-first reporting expectations.
 
 Verification:

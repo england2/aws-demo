@@ -24,7 +24,7 @@ func CheckTime() {
 	elapsedMinutes := int(time.Since(time.Unix(startTime, 0)).Minutes())
 	if elapsedMinutes >= 12 {
 
-		fmt.Printf("Your elapsed time is >= 12 minutes! Therefore, due to AWS Lambda limitations, you have failed this task. Please heed the following instructions")
+		fmt.Printf("Your elapsed time is >= 12 minutes. Therefore, due to this Fargate task's configured runtime budget, you have failed this task. Please heed the following instructions")
 		Ending()
 		return
 	}
