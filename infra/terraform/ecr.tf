@@ -36,8 +36,8 @@ resource "aws_ecr_lifecycle_policy" "cpu_spin" {
   })
 }
 
-resource "aws_ecr_repository" "agent_lambda" {
-  name                 = "agent-lambda"
+resource "aws_ecr_repository" "agent_fargate" {
+  name                 = "agent-fargate"
   image_tag_mutability = var.ecr_image_tag_mutability
 
   image_scanning_configuration {
@@ -49,12 +49,12 @@ resource "aws_ecr_repository" "agent_lambda" {
   }
 
   tags = {
-    Name = "agent-lambda"
+    Name = "agent-fargate"
   }
 }
 
-resource "aws_ecr_lifecycle_policy" "agent_lambda" {
-  repository = aws_ecr_repository.agent_lambda.name
+resource "aws_ecr_lifecycle_policy" "agent_fargate" {
+  repository = aws_ecr_repository.agent_fargate.name
 
   policy = jsonencode({
     rules = [

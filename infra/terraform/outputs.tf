@@ -38,14 +38,24 @@ output "ecr_registry_id" {
   value       = aws_ecr_repository.cpu_spin.registry_id
 }
 
-output "agent_lambda_ecr_repository_name" {
-  description = "Name of the ECR repository for the agent Lambda image."
-  value       = aws_ecr_repository.agent_lambda.name
+output "agent_fargate_ecr_repository_name" {
+  description = "Name of the ECR repository for the agent Fargate image."
+  value       = aws_ecr_repository.agent_fargate.name
 }
 
-output "agent_lambda_ecr_repository_url" {
-  description = "Repository URL for pushing and pulling the agent Lambda image."
-  value       = aws_ecr_repository.agent_lambda.repository_url
+output "agent_fargate_ecr_repository_url" {
+  description = "Repository URL for pushing and pulling the agent Fargate image."
+  value       = aws_ecr_repository.agent_fargate.repository_url
+}
+
+output "agent_fargate_task_role_name" {
+  description = "IAM role name for the agent Fargate task runtime."
+  value       = aws_iam_role.agent_fargate_task.name
+}
+
+output "agent_fargate_task_role_arn" {
+  description = "IAM role ARN for the agent Fargate task runtime."
+  value       = aws_iam_role.agent_fargate_task.arn
 }
 
 output "instance_role_name" {
