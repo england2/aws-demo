@@ -11,6 +11,14 @@ data "aws_iam_policy_document" "ecs_task_assume_role" {
   }
 }
 
+resource "aws_ecs_cluster" "agent_fargate" {
+  name = "ecs-cluster-agent-fargate"
+
+  tags = {
+    Name = "ecs-cluster-agent-fargate"
+  }
+}
+
 resource "aws_iam_role" "agent_fargate_task" {
   name               = "agent-fargate-task-role"
   assume_role_policy = data.aws_iam_policy_document.ecs_task_assume_role.json

@@ -48,6 +48,16 @@ output "agent_fargate_ecr_repository_url" {
   value       = aws_ecr_repository.agent_fargate.repository_url
 }
 
+output "agent_fargate_ecs_cluster_name" {
+  description = "ECS cluster name for agent Fargate tasks."
+  value       = aws_ecs_cluster.agent_fargate.name
+}
+
+output "agent_fargate_ecs_cluster_arn" {
+  description = "ECS cluster ARN for agent Fargate tasks."
+  value       = aws_ecs_cluster.agent_fargate.arn
+}
+
 output "agent_fargate_task_role_name" {
   description = "IAM role name for the agent Fargate task runtime."
   value       = aws_iam_role.agent_fargate_task.name
