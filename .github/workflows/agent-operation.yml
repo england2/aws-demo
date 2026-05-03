@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - "agent-operation/**"
+      - "agent-conductor/go-agent-conductor/**"
       - "infra/debian-agent-operation/inside/**"
       - ".github/workflows/agent-operation.yml"
   workflow_dispatch:
@@ -26,6 +26,12 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: agent-conductor/go-agent-conductor/go.mod
+          cache-dependency-path: agent-conductor/go-agent-conductor/go.sum
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -52,12 +58,8 @@ jobs:
       - name: Deploy agent-operation with SSM
         id: deploy
         run: |
-          if [ ! -d agent-operation/python ]; then
-            echo "agent-operation/python is missing from this checkout."
-            echo "Tracked files under agent-operation:"
-            git ls-files 'agent-operation/**'
-            echo "Top-level checkout contents:"
-            find . -maxdepth 2 -type d | sort
+          if [ ! -d agent-conductor/go-agent-conductor ]; then
+            echo "agent-conductor/go-agent-conductor is missing from this checkout."
             exit 1
           fi
 
@@ -68,9 +70,13 @@ jobs:
 
           rm -rf /tmp/agent-operation-payload
           mkdir -p /tmp/agent-operation-payload
-          cp -R agent-operation/python /tmp/agent-operation-payload/python
-          rm -rf /tmp/agent-operation-payload/python/.venv
+
+          cd agent-conductor/go-agent-conductor
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/agent-operation-payload/agent-conductor .
+          cd -
+
           cp infra/debian-agent-operation/inside/agent-operation.service /tmp/agent-operation-payload/agent-operation.service
+          cp infra/debian-agent-operation/inside/deploy-agent-operation.sh /tmp/agent-operation-payload/deploy-agent-operation.sh
           tar -czf /tmp/agent-operation-payload.tar.gz -C /tmp/agent-operation-payload .
 
           ARTIFACT_KEY="agent-operation/${{ github.sha }}.tar.gz"
@@ -83,7 +89,7 @@ jobs:
             --instance-ids "${{ steps.instance.outputs.instance_id }}" \
             --document-name "AWS-RunShellScript" \
             --comment "Deploy agent-operation ${{ github.sha }}" \
-            --parameters commands="bash /home/admin/deploy-agent-operation.sh ${{ github.sha }} $ARTIFACT_URI" \
+            --parameters commands="set -euo pipefail; TMP_DIR=/tmp/agent-operation-bootstrap-${{ github.sha }}; rm -rf \$TMP_DIR; mkdir -p \$TMP_DIR; aws s3 cp $ARTIFACT_URI \$TMP_DIR/payload.tar.gz; tar -xzf \$TMP_DIR/payload.tar.gz -C \$TMP_DIR; sudo install -m 0755 \$TMP_DIR/deploy-agent-operation.sh /home/admin/deploy-agent-operation.sh; bash /home/admin/deploy-agent-operation.sh ${{ github.sha }} $ARTIFACT_URI; rm -rf \$TMP_DIR" \
             --query 'Command.CommandId' \
             --output text)
 
