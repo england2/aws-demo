@@ -6,4 +6,3 @@ As far as I know, "Agent Orchestrator" largely refers to systems that spin up mu
 
 The noun "conductor" is mostly unclaimed in this context, and I have it to mean that this system is largely responsible for the lifecycle of multiple agents working on *separate features in separate codebases*, rather than coordinating close-quarter work between agents.
 
-
