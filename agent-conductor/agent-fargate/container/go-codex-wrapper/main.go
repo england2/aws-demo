@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -38,9 +39,9 @@ func main() {
 
 	// setup
 	write_start_time()
-	OPENAI_API_KEY = get_openai_key()
-	if err := codex_login(OPENAI_API_KEY); err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
+	OPENAI_API_KEY = strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+	if OPENAI_API_KEY == "" {
+		fmt.Fprintln(os.Stderr, "OPENAI_API_KEY is required")
 		os.Exit(1)
 	}
 

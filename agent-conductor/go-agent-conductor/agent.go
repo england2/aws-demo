@@ -5,8 +5,7 @@ type Agent struct {
 	AgentEventSQSQueue SQSPoller
 }
 
-func (a Agent) spawnFargateTask() {
 
-	// starts
+func (a Agent) spawnFargateTask() {
 
 }
