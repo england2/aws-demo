@@ -71,6 +71,7 @@ RUN apt-get update \
         tree \
         unzip \
         zip \
+        fd-find \
         vim \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
