@@ -68,6 +68,26 @@ output "agent_fargate_task_role_arn" {
   value       = aws_iam_role.agent_fargate_task.arn
 }
 
+output "agent_fargate_execution_role_name" {
+  description = "IAM role name used by ECS to pull the agent Fargate image."
+  value       = aws_iam_role.agent_fargate_execution.name
+}
+
+output "agent_fargate_execution_role_arn" {
+  description = "IAM role ARN used by ECS to pull the agent Fargate image."
+  value       = aws_iam_role.agent_fargate_execution.arn
+}
+
+output "agent_fargate_security_group_id" {
+  description = "Security group ID for temporary agent Fargate test tasks."
+  value       = aws_security_group.agent_fargate.id
+}
+
+output "agent_fargate_security_group_name" {
+  description = "Security group name for temporary agent Fargate test tasks."
+  value       = aws_security_group.agent_fargate.name
+}
+
 output "instance_role_name" {
   description = "IAM role attached to the EC2 instance."
   value       = aws_iam_role.server.name
