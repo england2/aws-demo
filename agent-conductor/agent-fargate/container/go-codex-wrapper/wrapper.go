@@ -6,7 +6,10 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 )
 
 type CodexCLIWrapper struct {
@@ -60,17 +63,22 @@ func StartCodexCLIWrapper(config CodexCLIWrapper) (*CodexCLIProcess, error) {
 		return nil, fmt.Errorf("tmux did not return a pane id")
 	}
 
-	pipe := exec.Command("tmux", "pipe-pane", "-o", "-t", paneID, "cat")
-	stdout, err := pipe.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("create tmux pipe stdout: %w", err)
+	fifoPath := tmuxPipeFIFOPath(config.SessionName, paneID)
+	_ = os.Remove(fifoPath)
+	if err := syscall.Mkfifo(fifoPath, 0600); err != nil {
+		return nil, fmt.Errorf("create tmux pipe fifo: %w", err)
 	}
-	stderr, err := pipe.StderrPipe()
-	if err != nil {
-		return nil, fmt.Errorf("create tmux pipe stderr: %w", err)
+
+	pipe := exec.Command("tmux", "pipe-pane", "-o", "-t", paneID, "cat > "+fifoPath)
+	if pipeOutput, err := pipe.CombinedOutput(); err != nil {
+		_ = os.Remove(fifoPath)
+		return nil, fmt.Errorf("install tmux pipe-pane: %w: %s", err, strings.TrimSpace(string(pipeOutput)))
 	}
-	if err := pipe.Start(); err != nil {
-		return nil, fmt.Errorf("start tmux pipe-pane: %w", err)
+
+	fifo, err := os.OpenFile(fifoPath, os.O_RDONLY, 0600)
+	if err != nil {
+		_ = os.Remove(fifoPath)
+		return nil, fmt.Errorf("open tmux pipe fifo: %w", err)
 	}
 
 	output := make(chan string)
@@ -78,29 +86,46 @@ func StartCodexCLIWrapper(config CodexCLIWrapper) (*CodexCLIProcess, error) {
 
 	go func() {
 		defer close(output)
-		readRawTerminalStream(output, stdout)
+		defer fifo.Close()
+		defer os.Remove(fifoPath)
+
+		readRawTerminalStream(output, fifo)
 	}()
 
-	// start our agent in a goroutine
 	go func() {
-		errText, _ := io.ReadAll(stderr)
-		if err := pipe.Wait(); err != nil {
-			if len(errText) > 0 {
-				done <- fmt.Errorf("tmux pipe-pane: %w: %s", err, strings.TrimSpace(string(errText)))
-			} else {
-				done <- fmt.Errorf("tmux pipe-pane: %w", err)
-			}
-			close(done)
-			return
-		}
-		done <- nil
-		close(done)
+		defer close(done)
+		done <- waitForTmuxSession(config.SessionName)
 	}()
 
 	return &CodexCLIProcess{
 		Output: output,
 		Done:   done,
 	}, nil
+}
+
+func waitForTmuxSession(sessionName string) error {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		cmd := exec.Command("tmux", "has-session", "-t", sessionName)
+		if err := cmd.Run(); err != nil {
+			return nil
+		}
+
+		<-ticker.C
+	}
+}
+
+func tmuxPipeFIFOPath(sessionName string, paneID string) string {
+	replacer := strings.NewReplacer(
+		"/", "-",
+		"\\", "-",
+		":", "-",
+		".", "-",
+		"%", "",
+	)
+	return filepath.Join("/tmp/agent-meta", "tmux-"+replacer.Replace(sessionName)+"-"+replacer.Replace(paneID)+".fifo")
 }
 
 func readRawTerminalStream(output chan<- string, reader io.Reader) {

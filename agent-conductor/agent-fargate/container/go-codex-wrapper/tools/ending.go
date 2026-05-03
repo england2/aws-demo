@@ -5,12 +5,15 @@ import (
 	"fmt"
 )
 
-// For readability, this file/tool *should be* named "print-report-guide.go", but is named "ending"
+// For readability, this file/tool *should be* named "print-report-guide", but is named "ending"
 // to dissuade the agent from calling it at any time other than right before shutdown.
 
-//go:embed report_guide.md
-var reportGuide string
+//go:embed ending-report.md
+var endingReport string
+
+//go:embed ending.go.md
+var EndingGuide string
 
 func Ending() {
-	fmt.Println(reportGuide)
+	fmt.Println(endingReport)
 }

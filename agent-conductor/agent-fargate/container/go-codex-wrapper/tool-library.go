@@ -9,15 +9,33 @@ import (
 
 type ToolFunc func()
 
-var toolRegistry = map[string]ToolFunc{}
-
-func registerBuiltinTools() {
-	register_tool("ending", tools.Ending)
-	register_tool("check-time", tools.CheckTime)
+type Tool struct {
+	Run   ToolFunc
+	Guide string
 }
 
-func register_tool(name string, tool ToolFunc) {
-	toolRegistry[name] = tool
+var toolRegistry = map[string]Tool{}
+
+func registerBuiltinTools() {
+	register_tool("ending", tools.Ending, tools.EndingGuide)
+	register_tool("check-time", tools.CheckTime, tools.CheckTimeGuide)
+	register_tool("print-tool-guides", printToolGuides, tools.PrintToolGuidesGuide)
+}
+
+func register_tool(name string, run ToolFunc, guide string) {
+	if run == nil {
+		panic(fmt.Sprintf("tool %q has no run function", name))
+	}
+
+	guide = strings.TrimSpace(guide)
+	if guide == "" {
+		panic(fmt.Sprintf("tool %q has no guide", name))
+	}
+
+	toolRegistry[name] = Tool{
+		Run:   run,
+		Guide: guide,
+	}
 }
 
 func runToolArgument(arg string) bool {
@@ -32,7 +50,7 @@ func runToolArgument(arg string) bool {
 		return true
 	}
 
-	tool()
+	tool.Run()
 	return true
 }
 
@@ -44,4 +62,11 @@ func registeredToolNames() []string {
 
 	sort.Strings(names)
 	return names
+}
+
+func printToolGuides() {
+	for _, name := range registeredToolNames() {
+		tool := toolRegistry[name]
+		fmt.Printf("# =============================================================\n%s\n\n", tool.Guide)
+	}
 }

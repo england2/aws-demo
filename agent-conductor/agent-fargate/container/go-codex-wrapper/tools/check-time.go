@@ -1,6 +1,7 @@
 package tools
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"strconv"
@@ -8,6 +9,10 @@ import (
 	"time"
 )
 
+//go:embed check-time.go.md
+var CheckTimeGuide string
+
+// should replace this with codex SDK and a simple countdown timer in the future.
 func CheckTime() {
 	startTimeBytes, err := os.ReadFile("/tmp/agent-meta/start-time.txt")
 	if err != nil {
