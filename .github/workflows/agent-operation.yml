@@ -6,7 +6,7 @@ on:
       - main
     paths:
       - "agent-conductor/go-agent-conductor/**"
-      - "infra/debian-agent-operation/inside/**"
+      - "infra/ad-hoc/debian-agent-operation/inside/**"
       - ".github/workflows/agent-operation.yml"
   workflow_dispatch:
 
@@ -63,8 +63,8 @@ jobs:
             exit 1
           fi
 
-          if [ ! -f infra/debian-agent-operation/inside/agent-operation.service ]; then
-            echo "infra/debian-agent-operation/inside/agent-operation.service is missing from this checkout."
+          if [ ! -f infra/ad-hoc/debian-agent-operation/inside/agent-operation.service ]; then
+            echo "infra/ad-hoc/debian-agent-operation/inside/agent-operation.service is missing from this checkout."
             exit 1
           fi
 
@@ -75,8 +75,8 @@ jobs:
           GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/agent-operation-payload/agent-conductor .
           cd -
 
-          cp infra/debian-agent-operation/inside/agent-operation.service /tmp/agent-operation-payload/agent-operation.service
-          cp infra/debian-agent-operation/inside/deploy-agent-operation.sh /tmp/agent-operation-payload/deploy-agent-operation.sh
+          cp infra/ad-hoc/debian-agent-operation/inside/agent-operation.service /tmp/agent-operation-payload/agent-operation.service
+          cp infra/ad-hoc/debian-agent-operation/inside/deploy-agent-operation.sh /tmp/agent-operation-payload/deploy-agent-operation.sh
           tar -czf /tmp/agent-operation-payload.tar.gz -C /tmp/agent-operation-payload .
 
           ARTIFACT_KEY="agent-operation/${{ github.sha }}.tar.gz"
