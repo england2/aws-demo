@@ -19,3 +19,6 @@ ignore.*
 
 # keep documentation files, (p) real md files
 !*.docs.md
+
+# ignore db if we test locally
+database-*.sqlite
