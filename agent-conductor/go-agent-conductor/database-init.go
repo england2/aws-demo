@@ -24,7 +24,7 @@ func check_load_db() error {
 	}
 
 	init_db := func() error {
-		newPath := filepath.Join(databaseDir, fmt.Sprintf("database-%d.sqlite", time.Now().Unix()))
+		newPath := filepath.Join(databaseDir, fmt.Sprintf("database-%d.sqlite", time.Now().UnixNano()))
 		db, err := sql.Open("sqlite", newPath)
 		if err != nil {
 			return fmt.Errorf("open new database: %w", err)
@@ -37,6 +37,10 @@ func check_load_db() error {
 
 		db_path = newPath
 		return nil
+	}
+
+	if debugForceNewDB() {
+		return init_db()
 	}
 
 	path, ok, err := newestDatabasePath(databaseDir)
@@ -54,6 +58,11 @@ func check_load_db() error {
 	}
 
 	return nil
+}
+
+func debugForceNewDB() bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv("DEBUG_FORCE_NEW_DB")))
+	return value == "1" || value == "true" || value == "yes" || value == "on"
 }
 
 func newestDatabasePath(dir string) (string, bool, error) {
