@@ -1,5 +1,7 @@
 package main
 
+// Oh no, a hard-coded config file!
+
 var adhocAWSFargateSpawnConfig = AWSFargateSpawnConfig{
 	Region:         "us-west-2",
 	Cluster:        "ecs-cluster-agent-fargate",

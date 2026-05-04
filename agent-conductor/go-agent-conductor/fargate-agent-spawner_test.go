@@ -18,10 +18,12 @@ func TestBuildRunTaskInputUsesTerraformTaskDefinitionAndJobOverrides(t *testing.
 			SecurityGroups: []string{"sg-1"},
 			AssignPublicIP: true,
 		},
-		AgentJobID:     "42",
-		AgentName:      "agent-fargate-codex",
-		Prompt:         "do the work",
-		EventsQueueURL: "https://sqs.us-west-2.amazonaws.com/204772699175/agent-fargate-events",
+		RuntimeEnv: AgentFargateRuntimeEnv{
+			AgentJobID:     "42",
+			AgentName:      "agent-fargate-codex",
+			Prompt:         "do the work",
+			EventsQueueURL: "https://sqs.us-west-2.amazonaws.com/204772699175/agent-fargate-events",
+		},
 	})
 	if err != nil {
 		t.Fatalf("BuildRunTaskInput error: %v", err)

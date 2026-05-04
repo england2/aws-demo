@@ -71,10 +71,12 @@ func spawnAndTrackAgentJob(ctx context.Context, databaseCommands chan<- Database
 	agentJobID := strconv.FormatInt(agentJob.ID, 10)
 	agentConfig := AgentFargateJobConfig{
 		AWSFargateSpawnConfig: adhocAWSFargateSpawnConfig,
-		AgentJobID:            agentJobID,
-		AgentName:             agentJob.AgentName,
-		Prompt:                buildAgentPrompt(agentJob, message),
-		EventsQueueURL:        adhocAgentFargateEventsQueueURL,
+		RuntimeEnv: AgentFargateRuntimeEnv{
+			AgentJobID:     agentJobID,
+			AgentName:      agentJob.AgentName,
+			Prompt:         buildAgentPrompt(agentJob, message),
+			EventsQueueURL: adhocAgentFargateEventsQueueURL,
+		},
 	}
 
 	spawnResult, err := SpawnFargateAgent(ctx, agentConfig)

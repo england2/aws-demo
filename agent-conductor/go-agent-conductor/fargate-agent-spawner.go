@@ -24,6 +24,10 @@ type AWSFargateSpawnConfig struct {
 type AgentFargateJobConfig struct {
 	AWSFargateSpawnConfig AWSFargateSpawnConfig
 
+	RuntimeEnv AgentFargateRuntimeEnv
+}
+
+type AgentFargateRuntimeEnv struct {
 	AgentJobID     string
 	AgentName      string
 	Prompt         string
@@ -79,7 +83,7 @@ func BuildRunTaskInput(agentConfig AgentFargateJobConfig) (*ecs.RunTaskInput, er
 		TaskDefinition: aws.String(agentConfig.AWSFargateSpawnConfig.TaskDefinition),
 		LaunchType:     ecstypes.LaunchTypeFargate,
 		Count:          aws.Int32(1),
-		ClientToken:    aws.String("agent-job-" + agentConfig.AgentJobID),
+		ClientToken:    aws.String("agent-job-" + agentConfig.RuntimeEnv.AgentJobID),
 		StartedBy:      aws.String("agent-conductor"),
 		NetworkConfiguration: &ecstypes.NetworkConfiguration{
 			AwsvpcConfiguration: &ecstypes.AwsVpcConfiguration{
@@ -91,13 +95,8 @@ func BuildRunTaskInput(agentConfig AgentFargateJobConfig) (*ecs.RunTaskInput, er
 		Overrides: &ecstypes.TaskOverride{
 			ContainerOverrides: []ecstypes.ContainerOverride{
 				{
-					Name: aws.String(agentConfig.AWSFargateSpawnConfig.ContainerName),
-					Environment: []ecstypes.KeyValuePair{
-						{Name: aws.String("AGENT_JOB_ID"), Value: aws.String(agentConfig.AgentJobID)},
-						{Name: aws.String("AGENT_NAME"), Value: aws.String(agentConfig.AgentName)},
-						{Name: aws.String("AGENT_PROMPT"), Value: aws.String(agentConfig.Prompt)},
-						{Name: aws.String("AGENT_FARGATE_EVENTS_QUEUE_URL"), Value: aws.String(agentConfig.EventsQueueURL)},
-					},
+					Name:        aws.String(agentConfig.AWSFargateSpawnConfig.ContainerName),
+					Environment: agentConfig.RuntimeEnv.ECSEnvironment(),
 				},
 			},
 		},
@@ -107,14 +106,15 @@ func BuildRunTaskInput(agentConfig AgentFargateJobConfig) (*ecs.RunTaskInput, er
 
 func validateAgentFargateJobConfig(agentConfig AgentFargateJobConfig) error {
 	spawnConfig := agentConfig.AWSFargateSpawnConfig
+	runtimeEnv := agentConfig.RuntimeEnv
 	required := map[string]string{
 		"Region":         spawnConfig.Region,
 		"Cluster":        spawnConfig.Cluster,
 		"TaskDefinition": spawnConfig.TaskDefinition,
 		"ContainerName":  spawnConfig.ContainerName,
-		"AgentJobID":     agentConfig.AgentJobID,
-		"AgentName":      agentConfig.AgentName,
-		"EventsQueueURL": agentConfig.EventsQueueURL,
+		"AgentJobID":     runtimeEnv.AgentJobID,
+		"AgentName":      runtimeEnv.AgentName,
+		"EventsQueueURL": runtimeEnv.EventsQueueURL,
 	}
 
 	var missing []string
@@ -134,6 +134,15 @@ func validateAgentFargateJobConfig(agentConfig AgentFargateJobConfig) error {
 	}
 
 	return nil
+}
+
+func (runtimeEnv AgentFargateRuntimeEnv) ECSEnvironment() []ecstypes.KeyValuePair {
+	return []ecstypes.KeyValuePair{
+		{Name: aws.String("AGENT_JOB_ID"), Value: aws.String(runtimeEnv.AgentJobID)},
+		{Name: aws.String("AGENT_NAME"), Value: aws.String(runtimeEnv.AgentName)},
+		{Name: aws.String("AGENT_PROMPT"), Value: aws.String(runtimeEnv.Prompt)},
+		{Name: aws.String("AGENT_FARGATE_EVENTS_QUEUE_URL"), Value: aws.String(runtimeEnv.EventsQueueURL)},
+	}
 }
 
 func formatECSFailures(failures []ecstypes.Failure) string {
