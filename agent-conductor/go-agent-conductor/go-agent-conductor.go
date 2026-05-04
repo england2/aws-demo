@@ -9,6 +9,8 @@ import (
 
 func main() {
 
+	fmt.Println("Agent Conductor started!")
+
 	// fail early if the conductor cannot find or initialize a usable database.
 	if err := check_load_db(); err != nil {
 		fmt.Fprintf(os.Stderr, "load database: %v\n", err)
