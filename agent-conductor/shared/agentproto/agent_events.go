@@ -18,6 +18,7 @@ const (
 )
 
 type AgentEvent struct {
+	EventID     string         `json:"event_id"`
 	JobID       string         `json:"job_id"`
 	AgentName   string         `json:"agent_name"`
 	Type        AgentEventType `json:"type"`

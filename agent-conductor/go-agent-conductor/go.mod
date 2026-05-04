@@ -6,6 +6,7 @@ require (
 	agentproto v0.0.0
 	github.com/aws/aws-sdk-go-v2 v1.41.7
 	github.com/aws/aws-sdk-go-v2/config v1.32.1
+	github.com/aws/aws-sdk-go-v2/service/ecs v1.79.1
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.42.11
 	modernc.org/sqlite v1.50.0
 )

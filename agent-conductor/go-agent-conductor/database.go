@@ -42,8 +42,25 @@ type DatabaseAgentJobInfo struct {
 	AffectedRepos     *string
 	PullRequestURL    *string
 	FailureReason     *string
+	ECSTaskARN        *string
+	ECSLastStatus     *string
+	ECSStoppedReason  *string
 	CreatedAt         time.Time
 	StartedAt         *time.Time
 	CompletedAt       *time.Time
 	UpdatedAt         time.Time
+}
+
+type DatabaseAgentEventInfo struct {
+	ID          int64
+	EventID     string
+	AgentJobID  int64
+	AgentName   string
+	EventType   string
+	Message     *string
+	ReportPath  *string
+	ArtifactURL *string
+	RawBody     string
+	CreatedAt   *time.Time
+	ReceivedAt  time.Time
 }

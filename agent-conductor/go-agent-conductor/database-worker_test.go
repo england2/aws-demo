@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"fmt"
 	"testing"
+	"time"
 
+	"agentproto"
 	_ "modernc.org/sqlite"
 )
 
@@ -39,6 +41,68 @@ func TestRecordSQSMessageAndDecideCreatesThenChainsCloudWatchAlarm(t *testing.T)
 	}
 	if second.Message.JobStatus == nil || *second.Message.JobStatus != AgentJobStatusDuplicate {
 		t.Fatalf("second JobStatus = %v, want duplicate", second.Message.JobStatus)
+	}
+}
+
+func TestRecordAgentEventIsIdempotentAndMarksJobSucceeded(t *testing.T) {
+	db := newTestDatabase(t)
+	ctx := context.Background()
+
+	decision := recordSQSMessageAndDecide(ctx, db, testSQSMessage("sqs-1", "event-1", "2026-05-01T04:15:00Z"))
+	if decision.Err != nil {
+		t.Fatalf("decision error: %v", decision.Err)
+	}
+	if decision.AgentJob == nil {
+		t.Fatalf("decision AgentJob is nil")
+	}
+
+	spawned := markAgentJobSpawned(ctx, db, decision.AgentJob.ID, "arn:aws:ecs:task/test")
+	if spawned.Err != nil {
+		t.Fatalf("spawned error: %v", spawned.Err)
+	}
+
+	event := agentproto.AgentEvent{
+		EventID:    "agent-event-1",
+		JobID:      fmt.Sprint(decision.AgentJob.ID),
+		AgentName:  decision.AgentJob.AgentName,
+		Type:       agentproto.JobCompleted,
+		ReportPath: "/tmp/report.md",
+		CreatedAt:  time.Now().UTC(),
+	}
+
+	first := recordAgentEvent(ctx, db, &event, `{"event_id":"agent-event-1"}`)
+	if first.Err != nil {
+		t.Fatalf("first record event error: %v", first.Err)
+	}
+	if !first.Terminal {
+		t.Fatalf("first Terminal = false, want true")
+	}
+	if first.AgentJob == nil || first.AgentJob.Status != AgentJobStatusSucceeded {
+		t.Fatalf("first AgentJob status = %+v, want succeeded", first.AgentJob)
+	}
+
+	second := recordAgentEvent(ctx, db, &event, `{"event_id":"agent-event-1"}`)
+	if second.Err != nil {
+		t.Fatalf("second record event error: %v", second.Err)
+	}
+	if second.Reason != "duplicate_agent_event" {
+		t.Fatalf("second Reason = %q, want duplicate_agent_event", second.Reason)
+	}
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM agent_event WHERE event_id = ?`, event.EventID).Scan(&count); err != nil {
+		t.Fatalf("count agent event: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("agent event count = %d, want 1", count)
+	}
+
+	var messageStatus string
+	if err := db.QueryRow(`SELECT job_status FROM sqs_messages_tickets_cloudwatch WHERE id = ?`, decision.Message.ID).Scan(&messageStatus); err != nil {
+		t.Fatalf("read linked message status: %v", err)
+	}
+	if messageStatus != string(AgentJobStatusSucceeded) {
+		t.Fatalf("linked message status = %q, want succeeded", messageStatus)
 	}
 }
 

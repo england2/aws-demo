@@ -103,7 +103,7 @@ func validateDatabase(path string) error {
 		return fmt.Errorf("ping database %s: %w", path, err)
 	}
 
-	requiredTables := []string{"sqs_messages_tickets_cloudwatch", "agent_job_info"}
+	requiredTables := []string{"sqs_messages_tickets_cloudwatch", "agent_job_info", "agent_event"}
 	for _, table := range requiredTables {
 		var count int
 		err := db.QueryRow(
@@ -122,6 +122,9 @@ func validateDatabase(path string) error {
 		return err
 	}
 	if err := validateAgentJobShape(db); err != nil {
+		return err
+	}
+	if err := validateAgentEventShape(db); err != nil {
 		return err
 	}
 
@@ -205,6 +208,9 @@ func validateAgentJobShape(db *sql.DB) error {
 			affected_repositories,
 			pull_request_url,
 			failure_reason,
+			ecs_task_arn,
+			ecs_last_status,
+			ecs_stopped_reason,
 			created_at,
 			started_at,
 			completed_at,
@@ -227,6 +233,9 @@ func validateAgentJobShape(db *sql.DB) error {
 			affectedRepos     sql.NullString
 			pullRequestURL    sql.NullString
 			failureReason     sql.NullString
+			ecsTaskARN        sql.NullString
+			ecsLastStatus     sql.NullString
+			ecsStoppedReason  sql.NullString
 			createdAt         string
 			startedAt         sql.NullString
 			completedAt       sql.NullString
@@ -242,12 +251,72 @@ func validateAgentJobShape(db *sql.DB) error {
 			&affectedRepos,
 			&pullRequestURL,
 			&failureReason,
+			&ecsTaskARN,
+			&ecsLastStatus,
+			&ecsStoppedReason,
 			&createdAt,
 			&startedAt,
 			&completedAt,
 			&updatedAt,
 		); err != nil {
 			return fmt.Errorf("deserialize agent_job_info sample: %w", err)
+		}
+	}
+
+	return rows.Err()
+}
+
+func validateAgentEventShape(db *sql.DB) error {
+	rows, err := db.Query(`
+		SELECT
+			id,
+			event_id,
+			agent_job_id,
+			agent_name,
+			event_type,
+			message,
+			report_path,
+			artifact_url,
+			raw_body,
+			created_at,
+			received_at
+		FROM agent_event
+		LIMIT 1
+	`)
+	if err != nil {
+		return fmt.Errorf("validate agent_event shape: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			id          int64
+			eventID     string
+			agentJobID  int64
+			agentName   string
+			eventType   string
+			message     sql.NullString
+			reportPath  sql.NullString
+			artifactURL sql.NullString
+			rawBody     string
+			createdAt   sql.NullString
+			receivedAt  string
+		)
+
+		if err := rows.Scan(
+			&id,
+			&eventID,
+			&agentJobID,
+			&agentName,
+			&eventType,
+			&message,
+			&reportPath,
+			&artifactURL,
+			&rawBody,
+			&createdAt,
+			&receivedAt,
+		); err != nil {
+			return fmt.Errorf("deserialize agent_event sample: %w", err)
 		}
 	}
 
