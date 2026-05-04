@@ -85,6 +85,8 @@ func BuildRunTaskInput(agentConfig AgentFargateJobConfig) (*ecs.RunTaskInput, er
 		Count:          aws.Int32(1),
 		ClientToken:    aws.String("agent-job-" + agentConfig.RuntimeEnv.AgentJobID),
 		StartedBy:      aws.String("agent-conductor"),
+		// Required so local operators can attach with ECS Exec to the remote tmux session.
+		EnableExecuteCommand: true,
 		NetworkConfiguration: &ecstypes.NetworkConfiguration{
 			AwsvpcConfiguration: &ecstypes.AwsVpcConfiguration{
 				Subnets:        agentConfig.AWSFargateSpawnConfig.Subnets,

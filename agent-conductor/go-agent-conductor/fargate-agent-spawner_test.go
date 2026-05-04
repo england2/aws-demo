@@ -41,6 +41,9 @@ func TestBuildRunTaskInputUsesTerraformTaskDefinitionAndJobOverrides(t *testing.
 	if aws.ToString(input.ClientToken) != "agent-job-42" {
 		t.Fatalf("ClientToken = %q", aws.ToString(input.ClientToken))
 	}
+	if !input.EnableExecuteCommand {
+		t.Fatalf("EnableExecuteCommand = false, want true")
+	}
 	if input.NetworkConfiguration.AwsvpcConfiguration.AssignPublicIp != ecstypes.AssignPublicIpEnabled {
 		t.Fatalf("AssignPublicIp = %q, want ENABLED", input.NetworkConfiguration.AwsvpcConfiguration.AssignPublicIp)
 	}
