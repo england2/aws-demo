@@ -54,9 +54,9 @@ resource "aws_iam_role" "agent_fargate_task" {
   }
 }
 
-data "aws_iam_policy_document" "agent_fargate_openai_secret_read" {
+data "aws_iam_policy_document" "agent_fargate_secret_read" {
   statement {
-    sid    = "ReadOpenAIAPIKey"
+    sid    = "ReadAgentFargateSecrets"
     effect = "Allow"
 
     actions = [
@@ -65,14 +65,15 @@ data "aws_iam_policy_document" "agent_fargate_openai_secret_read" {
 
     resources = [
       "arn:aws:secretsmanager:${var.aws_region}:204772699175:secret:openai-key-aws-demo-agent-fargate-*",
+      "arn:aws:secretsmanager:${var.aws_region}:204772699175:secret:fine-grained-gh-pat-aws-demo-*",
     ]
   }
 }
 
-resource "aws_iam_role_policy" "agent_fargate_openai_secret_read" {
-  name   = "agent-fargate-openai-secret-read"
+resource "aws_iam_role_policy" "agent_fargate_secret_read" {
+  name   = "agent-fargate-secret-read"
   role   = aws_iam_role.agent_fargate_task.id
-  policy = data.aws_iam_policy_document.agent_fargate_openai_secret_read.json
+  policy = data.aws_iam_policy_document.agent_fargate_secret_read.json
 }
 
 data "aws_iam_policy_document" "agent_fargate_ecs_exec" {
