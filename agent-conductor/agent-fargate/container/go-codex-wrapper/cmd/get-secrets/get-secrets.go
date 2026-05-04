@@ -13,11 +13,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 )
 
-const defaultOpenAISecretName = "openai-key-aws-demo-agent-fargate"
 const defaultRegion = "us-west-2"
 
-func openai_api_key(region string) {
-	value, err := readSecretValue(context.Background(), region, defaultOpenAISecretName, "")
+func print_secret(region string, secretName string) {
+	value, err := readSecretValue(context.Background(), region, secretName, "")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -26,22 +25,17 @@ func openai_api_key(region string) {
 }
 
 func main() {
-	openAIKey := flag.Bool("openai_api_key", false, "print the OpenAI API key secret")
-	secretName := flag.String("secret-name", "", "AWS Secrets Manager secret name or ARN")
 	region := flag.String("region", defaultRegion, "AWS region")
 	field := flag.String("field", "", "optional JSON field to print from the secret value")
 	flag.Parse()
 
-	if *openAIKey {
-		openai_api_key(*region)
-		return
+	args := flag.Args()
+	if len(args) != 1 {
+		log.Fatal("usage: get-secrets <secret-name>")
 	}
+	secretName := args[0]
 
-	if *secretName == "" {
-		log.Fatal("choose a secret with --openai_api_key or --secret-name")
-	}
-
-	value, err := readSecretValue(context.Background(), *region, *secretName, *field)
+	value, err := readSecretValue(context.Background(), *region, secretName, *field)
 	if err != nil {
 		log.Fatal(err)
 	}
