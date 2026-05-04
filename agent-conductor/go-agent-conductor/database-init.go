@@ -103,7 +103,7 @@ func validateDatabase(path string) error {
 		return fmt.Errorf("ping database %s: %w", path, err)
 	}
 
-	requiredTables := []string{"sqs_message", "agent_job_info"}
+	requiredTables := []string{"sqs_messages_tickets_cloudwatch", "agent_job_info"}
 	for _, table := range requiredTables {
 		var count int
 		err := db.QueryRow(
@@ -137,15 +137,19 @@ func validateSQSMessageShape(db *sql.DB) error {
 			external_event_id,
 			raw_body,
 			message_type,
+			cloudwatch_alarm_name,
+			cloudwatch_state,
+			event_time,
+			alarm_period_seconds,
 			assigned_agent_job_id,
 			job_status,
 			created_at,
 			updated_at
-		FROM sqs_message
+		FROM sqs_messages_tickets_cloudwatch
 		LIMIT 1
 	`)
 	if err != nil {
-		return fmt.Errorf("validate sqs_message shape: %w", err)
+		return fmt.Errorf("validate sqs_messages_tickets_cloudwatch shape: %w", err)
 	}
 	defer rows.Close()
 
@@ -157,6 +161,10 @@ func validateSQSMessageShape(db *sql.DB) error {
 			externalEventID    sql.NullString
 			rawBody            string
 			messageType        string
+			cloudwatchAlarm    sql.NullString
+			cloudwatchState    sql.NullString
+			eventTime          sql.NullString
+			alarmPeriodSeconds sql.NullInt64
 			assignedAgentJobID sql.NullInt64
 			jobStatus          sql.NullString
 			createdAt          string
@@ -170,12 +178,16 @@ func validateSQSMessageShape(db *sql.DB) error {
 			&externalEventID,
 			&rawBody,
 			&messageType,
+			&cloudwatchAlarm,
+			&cloudwatchState,
+			&eventTime,
+			&alarmPeriodSeconds,
 			&assignedAgentJobID,
 			&jobStatus,
 			&createdAt,
 			&updatedAt,
 		); err != nil {
-			return fmt.Errorf("deserialize sqs_message sample: %w", err)
+			return fmt.Errorf("deserialize sqs_messages_tickets_cloudwatch sample: %w", err)
 		}
 	}
 

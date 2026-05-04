@@ -196,7 +196,7 @@ After `RunTask`, store the ECS task ARN:
 ```text
 agent_job_info.ecs_task_arn
 agent_job_info.status = "running"
-sqs_message.job_status = "running"
+sqs_messages_tickets_cloudwatch.job_status = "running"
 ```
 
 Then use:

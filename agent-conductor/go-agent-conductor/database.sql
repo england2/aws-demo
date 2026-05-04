@@ -1,12 +1,16 @@
 PRAGMA foreign_keys = ON;
 
-CREATE TABLE IF NOT EXISTS sqs_message (
+CREATE TABLE IF NOT EXISTS sqs_messages_tickets_cloudwatch (
     id INTEGER PRIMARY KEY,
     external_message_id TEXT NOT NULL UNIQUE,
     receipt_handle TEXT NOT NULL,
     external_event_id TEXT,
     raw_body TEXT NOT NULL,
     message_type TEXT NOT NULL DEFAULT 'unknown',
+    cloudwatch_alarm_name TEXT,
+    cloudwatch_state TEXT,
+    event_time TEXT,
+    alarm_period_seconds INTEGER,
     assigned_agent_job_id INTEGER,
     job_status TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -27,17 +31,20 @@ CREATE TABLE IF NOT EXISTS agent_job_info (
     started_at TEXT,
     completed_at TEXT,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (spawn_sqs_message_id) REFERENCES sqs_message(id)
+    FOREIGN KEY (spawn_sqs_message_id) REFERENCES sqs_messages_tickets_cloudwatch(id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_sqs_message_external_event_id
-    ON sqs_message(external_event_id);
+CREATE INDEX IF NOT EXISTS idx_sqs_messages_tickets_cloudwatch_external_event_id
+    ON sqs_messages_tickets_cloudwatch(external_event_id);
 
-CREATE INDEX IF NOT EXISTS idx_sqs_message_assigned_agent_job_id
-    ON sqs_message(assigned_agent_job_id);
+CREATE INDEX IF NOT EXISTS idx_sqs_messages_tickets_cloudwatch_assigned_agent_job_id
+    ON sqs_messages_tickets_cloudwatch(assigned_agent_job_id);
 
-CREATE INDEX IF NOT EXISTS idx_sqs_message_job_status
-    ON sqs_message(job_status);
+CREATE INDEX IF NOT EXISTS idx_sqs_messages_tickets_cloudwatch_job_status
+    ON sqs_messages_tickets_cloudwatch(job_status);
+
+CREATE INDEX IF NOT EXISTS idx_sqs_messages_tickets_cloudwatch_alarm_name_event_time
+    ON sqs_messages_tickets_cloudwatch(cloudwatch_alarm_name, event_time);
 
 CREATE INDEX IF NOT EXISTS idx_agent_job_info_status
     ON agent_job_info(status);
