@@ -58,6 +58,31 @@ output "agent_fargate_ecs_cluster_arn" {
   value       = aws_ecs_cluster.agent_fargate.arn
 }
 
+output "agent_fargate_task_definition_arn" {
+  description = "ECS task definition ARN for agent Fargate tasks."
+  value       = aws_ecs_task_definition.agent_fargate.arn
+}
+
+output "agent_fargate_task_definition_family" {
+  description = "ECS task definition family for agent Fargate tasks."
+  value       = aws_ecs_task_definition.agent_fargate.family
+}
+
+output "agent_fargate_container_name" {
+  description = "Container name used by the agent Fargate task definition."
+  value       = "agent-fargate"
+}
+
+output "agent_fargate_events_queue_url" {
+  description = "SQS queue URL for worker-emitted agent Fargate events."
+  value       = aws_sqs_queue.agent_fargate_events.url
+}
+
+output "agent_fargate_events_queue_arn" {
+  description = "SQS queue ARN for worker-emitted agent Fargate events."
+  value       = aws_sqs_queue.agent_fargate_events.arn
+}
+
 output "agent_fargate_task_role_name" {
   description = "IAM role name for the agent Fargate task runtime."
   value       = aws_iam_role.agent_fargate_task.name
