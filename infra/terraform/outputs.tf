@@ -113,6 +113,11 @@ output "agent_fargate_security_group_name" {
   value       = aws_security_group.agent_fargate.name
 }
 
+output "agent_fargate_default_subnet_ids" {
+  description = "Default VPC subnet IDs usable by agent Fargate tasks."
+  value       = data.aws_subnets.default_vpc.ids
+}
+
 output "instance_role_name" {
   description = "IAM role attached to the EC2 instance."
   value       = aws_iam_role.server.name
