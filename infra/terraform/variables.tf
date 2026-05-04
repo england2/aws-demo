@@ -24,6 +24,11 @@ variable "ssh_key_name" {
 variable "ssh_allowed_cidr" {
   description = "CIDR allowed to SSH to the instance. Use your current public IP with /32."
   type        = string
+
+  validation {
+    condition     = can(cidrhost(var.ssh_allowed_cidr, 0)) && split("/", var.ssh_allowed_cidr)[1] == "32"
+    error_message = "ssh_allowed_cidr must be a single IPv4 host CIDR, such as 203.0.113.10/32."
+  }
 }
 
 variable "debian_release" {
