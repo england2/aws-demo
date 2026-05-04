@@ -1,85 +1,109 @@
 # Database model
 
-The agent conductor needs a durable database record for agent work. The most
-important distinction is between the message that triggered work and the agent
-job created to handle that message.
+The agent conductor treats SQLite as the source of truth for SQS messages,
+agentJob creation decisions, and post-job debug state.
+
+For v1, there is no separate agent-definition matching layer. The database layer
+records an SQS message, parses deterministic fields from its body, inspects
+current database state, and returns a conductor decision: spawn a new agentJob or
+mark the message as already covered by an existing incident chain.
 
 ## Tables
 
-### `sqs_message`
+### `sqs_messages_tickets_cloudwatch`
 
-The `sqs_message` table stores messages consumed from the shared SQS event
-queue. A message may be inert, ignored, duplicated, or selected as the spawn
-point for an agent job.
+This table stores messages consumed from SQS queues that may contain tickets,
+CloudWatch/EventBridge alerts, or unknown messages.
 
-The table should include:
+It is intentionally verbose because multiple SQS queues may exist later. This
+table is the v1 decision surface for “should this message spawn an agentJob?”
+
+Minimum columns:
 
 - `id`: internal primary key.
 - `external_message_id`: SQS message ID.
-- `external_event_id`: event ID extracted from the message body when available.
-- `raw_body`: original SQS message body.
+- `receipt_handle`: SQS receipt handle used to delete the message after durable
+  handling.
+- `external_event_id`: EventBridge/CloudWatch event ID, when present.
+- `raw_body`: original SQS message body for audit/debug.
 - `message_type`: coarse message category such as `cloudwatch_alarm`, `ticket`,
   or `unknown`.
+- `cloudwatch_alarm_name`: parsed CloudWatch alarm name, when present.
+- `cloudwatch_state`: parsed CloudWatch alarm state, such as `ALARM`, when
+  present.
+- `event_time`: parsed event timestamp, when present.
+- `alarm_period_seconds`: parsed CloudWatch alarm period, when present.
 - `assigned_agent_job_id`: nullable foreign key to `agent_job_info.id`.
-- `job_status`: current status for this message's agent work, such as `created`,
-  `running`, `succeeded`, `failed`, `ignored`, or `duplicate`.
+- `job_status`: message-level status such as `created`, `running`,
+  `succeeded`, `failed`, `ignored`, or `duplicate`.
 - `created_at`: when the row was inserted.
 - `updated_at`: when the row was last changed.
 
-`assigned_agent_job_id` is only set after the conductor chooses this message as
-the spawn point for an agent. If no agent should run, the column remains null.
-`job_status` is stored directly on `sqs_message` so the conductor can quickly
-answer "what happened to this message?" without joining through
-`agent_job_info`. When `assigned_agent_job_id` is non-null, the row should point
-at the corresponding `agent_job_info.id`.
+Fields that affect deterministic conductor behavior should be stored as columns.
+`raw_body` is for debugging and audit, not repeated runtime decision parsing.
 
 ### `agent_job_info`
 
-The `agent_job_info` table stores durable state for one selected agent job. The
-Go struct name should be intentionally explicit: `DatabaseAgentJobInfo`.
+This table stores durable post-job/debug state for one spawned agentJob. The Go
+struct name should remain intentionally explicit: `DatabaseAgentJobInfo`.
 
-The table should include:
+Minimum columns:
 
 - `id`: internal primary key.
-- `agent_name`: selected spawner name.
-- `status`: current job state, such as `created`, `running`, `succeeded`, or
-  `failed`.
-- `spawn_sqs_message_id`: foreign key to the `sqs_message.id` row that caused
-  this job to be created.
+- `agent_name`: runtime/wrapper name. For v1 this can be a fixed Fargate Codex
+  runner name, not an agent-definition match.
+- `status`: current agentJob state, such as `created`, `running`, `succeeded`,
+  or `failed`.
+- `spawn_sqs_message_id`: foreign key to the
+  `sqs_messages_tickets_cloudwatch.id` row that caused this agentJob to be
+  created.
 - `agent_report`: final or latest agent-written report.
 - `affected_repositories`: text or JSON describing repos/codebases touched by
   the job.
 - `pull_request_url`: PR created by the agent, when applicable.
 - `failure_reason`: failure description, when applicable.
-- `created_at`: when the job row was created.
+- `created_at`: when the row was created.
 - `started_at`: when the runtime wrapper started.
 - `completed_at`: when the job reached a terminal state.
 - `updated_at`: when the row was last changed.
+
+The primary “is this incident already taken?” decision should be made from
+`sqs_messages_tickets_cloudwatch` state, not from `agent_job_info`.
 
 ## Relationship
 
 The important relationship is:
 
 ```text
-sqs_message.assigned_agent_job_id -> agent_job_info.id
-agent_job_info.spawn_sqs_message_id -> sqs_message.id
+sqs_messages_tickets_cloudwatch.assigned_agent_job_id -> agent_job_info.id
+agent_job_info.spawn_sqs_message_id -> sqs_messages_tickets_cloudwatch.id
 ```
 
 This means the database can answer both questions:
 
-- Given an SQS message, did it spawn an agent job?
-- Given an agent job, which SQS message caused it?
+- Given an SQS-derived message, did it spawn an agentJob?
+- Given an agentJob, which SQS-derived message caused it?
 
 ## Intended flow
 
-1. The conductor receives one SQS message.
-2. The conductor inserts or updates a `sqs_message` row.
-3. Registered `AgentSpawner` implementations inspect the message and return
-   `AgentMatch` values.
-4. If exactly one spawner is selected, the conductor creates an
-   `agent_job_info` row.
-5. The conductor updates `sqs_message.assigned_agent_job_id` to the new
-   `agent_job_info.id` and sets `sqs_message.job_status`.
-6. The conductor starts the runtime wrapper and receives `AgentEvent` updates.
-7. `AgentEvent` updates mutate both `agent_job_info.status` and
-   `sqs_message.job_status` until the job succeeds or fails.
+1. The conductor receives one SQS message from `poll.go`.
+2. `main.go` sends a typed database command to the database worker and blocks
+   waiting for its reply.
+3. The database worker inserts or updates a
+   `sqs_messages_tickets_cloudwatch` row.
+4. `parse_message.go` parses deterministic fields from the raw body, including
+   CloudWatch/EventBridge fields when present.
+5. The database worker checks current rows for the same CloudWatch alarm and
+   applies the time-chain rule.
+6. If the message starts a new incident chain, the database worker creates an
+   `agent_job_info` row and links it from
+   `sqs_messages_tickets_cloudwatch.assigned_agent_job_id`.
+7. If the message belongs to an existing incident chain, the database worker
+   marks it as duplicate/no-spawn.
+8. The database worker replies to `main.go` with the stored message row, whether
+   an agentJob should be spawned, and the optional `agent_job_info` row.
+9. `main.go` deletes the original SQS message only after durable database
+   handling succeeds.
+
+Actual Fargate spawning and worker event stream handling are outside this
+database/sqs-message v1 implementation slice.
