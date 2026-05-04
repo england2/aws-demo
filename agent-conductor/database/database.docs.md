@@ -34,8 +34,7 @@ Minimum columns:
 - `event_time`: parsed event timestamp, when present.
 - `alarm_period_seconds`: parsed CloudWatch alarm period, when present.
 - `assigned_agent_job_id`: nullable foreign key to `agent_job_info.id`.
-- `job_status`: message-level status such as `created`, `running`,
-  `succeeded`, `failed`, `ignored`, or `duplicate`.
+- `job_status`: message-level status such as `created`, `running`, `succeeded`, `failed`, `ignored`, or `duplicate`.
 - `created_at`: when the row was inserted.
 - `updated_at`: when the row was last changed.
 
