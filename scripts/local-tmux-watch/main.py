@@ -284,9 +284,10 @@ def existing_role_windows(config: Config) -> dict[str, str]:
 
 
 def operation_attach_command(config: Config) -> str:
-    tmux_attach = shlex.join(["tmux", "attach-session", "-t", config.operation_remote_session])
-    sudo_attach = shlex.join(["sudo", "-iu", config.operation_user, "tmux", "attach-session", "-t", config.operation_remote_session])
-    inner = f"{sudo_attach} || {tmux_attach} || exec /bin/bash"
+    attach = shlex.join(["tmux", "attach-session", "-t", config.operation_remote_session])
+    inner = f"{attach} || exec /bin/bash"
+    if config.operation_user:
+        inner = shlex.join(["sudo", "-iu", config.operation_user, "bash", "-lc", inner])
     return f"/bin/bash -lc {shlex.quote(inner)}"
 
 
@@ -462,7 +463,21 @@ def exec_agent_running(container: dict[str, Any]) -> bool:
 
 
 def remote_attach_command(config: Config) -> str:
-    inner = f"tmux attach-session -t {shlex.quote(config.remote_session)} || exec /bin/bash"
+    session = shlex.quote(config.remote_session)
+    inner = "\n".join(
+        [
+            f"session={session}",
+            "for attempt in $(seq 1 180); do",
+            '  if tmux has-session -t "${session}" 2>/dev/null; then',
+            '    exec tmux attach-session -t "${session}"',
+            "  fi",
+            '  printf "waiting for remote tmux session %s (%s/180)\\n" "${session}" "${attempt}"',
+            "  sleep 1",
+            "done",
+            'printf "remote tmux session %s was not found; opening shell\\n" "${session}"',
+            "exec /bin/bash",
+        ]
+    )
     return f"/bin/bash -lc {shlex.quote(inner)}"
 
 
@@ -488,8 +503,21 @@ def local_window_command(config: Config, task_arn: str) -> str:
     script = "\n".join(
         [
             f"printf '%s\\n' {shlex.quote('Connecting to ' + task_arn)}",
-            aws_command,
-            "status=$?",
+            "attempt=1",
+            "while true; do",
+            "  started=$(date +%s)",
+            f"  {aws_command}",
+            "  status=$?",
+            "  ended=$(date +%s)",
+            "  elapsed=$((ended - started))",
+            "  if [ \"${elapsed}\" -lt 20 ] && [ \"${attempt}\" -lt 60 ] && { [ \"${status}\" -eq 0 ] || [ \"${status}\" -eq 254 ]; }; then",
+            "    printf '\\n%s\\n' \"ECS Exec session ended before startup stabilized; retrying in 5s (attempt ${attempt}/60, status ${status}).\"",
+            "    attempt=$((attempt + 1))",
+            "    sleep 5",
+            "    continue",
+            "  fi",
+            "  break",
+            "done",
             "printf '\\n%s\\n' \"Remote tmux connection ended with exit code ${status}.\"",
             "printf '%s\\n' 'This local window is intentionally left open.'",
             'exec "${SHELL:-/bin/bash}" -l',
