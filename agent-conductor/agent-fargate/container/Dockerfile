@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 
-# build stage
-# =============================================================
+# ==============================================================
+# codex-wrapper build stage
+# ==============================================================
 
 ARG TARGETARCH
 
@@ -20,8 +21,9 @@ COPY agent-conductor/agent-fargate/container/go-codex-wrapper/cmd/ ./cmd/
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -o /out/codex-wrapper .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -o /out/get-secrets ./cmd/get-secrets
 
-# runtime container
-# =============================================================
+# ==============================================================
+# agent runtime container
+# ==============================================================
 
 FROM debian:bookworm-slim
 
@@ -36,46 +38,42 @@ COPY agent-conductor/agent-fargate/container/inside-container/work/ /home/root/w
 COPY agent-conductor/agent-fargate/container/inside-container/bootstrap/ ./
 COPY agent-conductor/agent-fargate/container/inside-container/bootstrap/entrypoint.sh /entrypoint.sh
 
-# directory structure
+# agent reports/etc directory
 RUN mkdir /tmp/agent-meta/
 
-
-
-# separating these installs here helps with dokcer build stage caching
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends nodejs npm \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-# install codex + runtime deps, and general runtime stuff
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends bubblewrap ca-certificates curl git ncurses-bin tar tmux \
-    && npm install -g @openai/codex@0.128.0 \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-# install software for codex to use
+# install software
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+        bubblewrap \
+        ca-certificates \
+        curl \
         fd-find \
         file \
         gh \
+        git \
         jq \
         less \
         make \
+        ncurses-bin \
+        nodejs \
+        npm \
         procps \
         psmisc \
         python3 \
         python3-pip \
         python3-venv \
         ripgrep \
+        tar \
+        tmux \
         tree \
         unzip \
         zip \
-        fd-find \
         vim \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# install codex separately so package changes do not always invalidate npm cache
+RUN npm install -g @openai/codex@0.128.0
 
 # install development tools
 RUN bash ./go.sh --version 1.26.2
