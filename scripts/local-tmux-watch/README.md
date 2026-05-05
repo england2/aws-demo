@@ -56,6 +56,7 @@ task stops or ECS Exec disconnects, the local window stays open.
 | Operation EC2 Name tag | `debian-agent-operation` | `--operation-instance-name` | `LOCAL_TMUX_WATCH_OPERATION_INSTANCE_NAME` |
 | Operation tmux session | `agent-operation` | `--operation-remote-session` | `LOCAL_TMUX_WATCH_OPERATION_REMOTE_SESSION` |
 | Operation tmux user | `admin` | `--operation-user` | `LOCAL_TMUX_WATCH_OPERATION_USER` |
+| Fargate SSH private key | `~/.ssh/aws-demo/fargate-debug-ed25519` | `--ssh-key` | `LOCAL_TMUX_WATCH_SSH_KEY` |
 | ECS `startedBy` filter | `agent-conductor` | `--started-by` | `LOCAL_TMUX_WATCH_STARTED_BY` |
 | Poll interval | `5` seconds | `--poll` | `LOCAL_TMUX_WATCH_POLL_SECONDS` |
 

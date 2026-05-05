@@ -19,6 +19,7 @@ DEFAULT_LOCAL_SESSION = "local-tmux-watch"
 DEFAULT_OPERATION_INSTANCE_NAME = "debian-agent-operation"
 DEFAULT_OPERATION_REMOTE_SESSION = "agent-operation"
 DEFAULT_OPERATION_USER = "admin"
+DEFAULT_SSH_KEY = "~/.ssh/aws-demo/fargate-debug-ed25519"
 DEFAULT_STARTED_BY = "agent-conductor"
 DEFAULT_POLL_SECONDS = 5.0
 WINDOW_TASK_ARN_OPTION = "@local-tmux-watch-task-arn"
@@ -36,6 +37,7 @@ class Config:
     operation_instance_name: str
     operation_remote_session: str
     operation_user: str
+    ssh_key: str
     started_by: str
     poll_seconds: float
     once: bool
@@ -45,9 +47,9 @@ class Config:
 @dataclass(frozen=True)
 class Task:
     arn: str
-    exec_enabled: bool
     has_container: bool
-    exec_agent_running: bool
+    network_interface_id: str | None
+    public_ip: str | None
 
 
 def env_value(name: str, default: str) -> str:
@@ -112,6 +114,11 @@ def parse_args(argv: list[str]) -> Config:
         help="Remote user that owns the agent-operation tmux session.",
     )
     parser.add_argument(
+        "--ssh-key",
+        default=env_value("LOCAL_TMUX_WATCH_SSH_KEY", DEFAULT_SSH_KEY),
+        help="Private key used for SSH to Fargate debug tasks.",
+    )
+    parser.add_argument(
         "--started-by",
         default=env_value("LOCAL_TMUX_WATCH_STARTED_BY", DEFAULT_STARTED_BY),
         help="ECS startedBy value to watch.",
@@ -146,6 +153,7 @@ def parse_args(argv: list[str]) -> Config:
         operation_instance_name=args.operation_instance_name,
         operation_remote_session=args.operation_remote_session,
         operation_user=args.operation_user,
+        ssh_key=expand_user(args.ssh_key),
         started_by=args.started_by,
         poll_seconds=args.poll,
         once=args.once,
@@ -156,6 +164,10 @@ def parse_args(argv: list[str]) -> Config:
 def require_command(name: str) -> None:
     if shutil.which(name) is None:
         raise SystemExit(f"missing required command on PATH: {name}")
+
+
+def expand_user(path: str) -> str:
+    return os.path.expanduser(path)
 
 
 def run_json(args: list[str]) -> Any:
@@ -447,78 +459,95 @@ def describe_tasks(config: Config, task_arns: list[str]) -> list[Task]:
             tasks.append(
                 Task(
                     arn=arn,
-                    exec_enabled=bool(task.get("enableExecuteCommand")),
                     has_container=bool(matching_containers),
-                    exec_agent_running=any(exec_agent_running(container) for container in matching_containers),
+                    network_interface_id=task_network_interface_id(task),
+                    public_ip=None,
                 )
             )
-    return tasks
+    return hydrate_task_public_ips(config, tasks)
 
 
-def exec_agent_running(container: dict[str, Any]) -> bool:
-    for managed_agent in container.get("managedAgents", []):
-        if managed_agent.get("name") == "ExecuteCommandAgent" and managed_agent.get("lastStatus") == "RUNNING":
-            return True
-    return False
+def task_network_interface_id(task: dict[str, Any]) -> str | None:
+    for attachment in task.get("attachments", []):
+        for detail in attachment.get("details", []):
+            if detail.get("name") == "networkInterfaceId" and detail.get("value"):
+                return detail["value"]
+    return None
 
 
-def remote_attach_command(config: Config) -> str:
-    session = shlex.quote(config.remote_session)
-    inner = "\n".join(
-        [
-            f"session={session}",
-            "for attempt in $(seq 1 180); do",
-            '  if tmux has-session -t "${session}" 2>/dev/null; then',
-            '    exec tmux attach-session -t "${session}"',
-            "  fi",
-            '  printf "waiting for remote tmux session %s (%s/180)\\n" "${session}" "${attempt}"',
-            "  sleep 1",
-            "done",
-            'printf "remote tmux session %s was not found; opening shell\\n" "${session}"',
-            "exec /bin/bash",
-        ]
-    )
-    return f"/bin/bash -lc {shlex.quote(inner)}"
+def hydrate_task_public_ips(config: Config, tasks: list[Task]) -> list[Task]:
+    eni_ids = [task.network_interface_id for task in tasks if task.network_interface_id]
+    if not eni_ids:
+        return tasks
 
-
-def local_window_command(config: Config, task_arn: str) -> str:
-    aws_command = shlex.join(
+    payload = run_json(
         [
             "aws",
-            "ecs",
-            "execute-command",
-            "--interactive",
+            "ec2",
+            "describe-network-interfaces",
             "--region",
             config.region,
-            "--cluster",
-            config.cluster,
-            "--task",
-            task_arn,
-            "--container",
-            config.container,
-            "--command",
-            remote_attach_command(config),
+            "--network-interface-ids",
+            *eni_ids,
+            "--output",
+            "json",
+        ]
+    )
+    public_ips: dict[str, str] = {}
+    for network_interface in payload.get("NetworkInterfaces", []):
+        eni_id = network_interface.get("NetworkInterfaceId", "")
+        public_ip = network_interface.get("Association", {}).get("PublicIp", "")
+        if eni_id and public_ip:
+            public_ips[eni_id] = public_ip
+
+    return [
+        Task(
+            arn=task.arn,
+            has_container=task.has_container,
+            network_interface_id=task.network_interface_id,
+            public_ip=public_ips.get(task.network_interface_id or ""),
+        )
+        for task in tasks
+    ]
+
+
+def local_ssh_window_command(config: Config, task: Task) -> str:
+    if not task.public_ip:
+        raise RuntimeError(f"task {task.arn} has no public IP")
+
+    remote_command = f"tmux attach-session -t {shlex.quote(config.remote_session)} || exec /bin/bash"
+    ssh_command = shlex.join(
+        [
+            "ssh",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            "ServerAliveInterval=15",
+            "-o",
+            "ServerAliveCountMax=2",
+            "-i",
+            config.ssh_key,
+            "-t",
+            f"root@{task.public_ip}",
+            remote_command,
         ]
     )
     script = "\n".join(
         [
-            f"printf '%s\\n' {shlex.quote('Connecting to ' + task_arn)}",
+            f"printf '%s\\n' {shlex.quote('Connecting to ' + task.arn + ' via SSH at ' + task.public_ip)}",
             "attempt=1",
             "while true; do",
-            "  started=$(date +%s)",
-            f"  {aws_command}",
+            f"  {ssh_command}",
             "  status=$?",
-            "  ended=$(date +%s)",
-            "  elapsed=$((ended - started))",
-            "  if [ \"${elapsed}\" -lt 20 ] && [ \"${attempt}\" -lt 60 ] && { [ \"${status}\" -eq 0 ] || [ \"${status}\" -eq 254 ]; }; then",
-            "    printf '\\n%s\\n' \"ECS Exec session ended before startup stabilized; retrying in 5s (attempt ${attempt}/60, status ${status}).\"",
+            "  if [ \"${status}\" -eq 255 ] && [ \"${attempt}\" -lt 60 ]; then",
+            "    printf '\\n%s\\n' \"SSH was not ready yet; retrying in 5s (attempt ${attempt}/60).\"",
             "    attempt=$((attempt + 1))",
             "    sleep 5",
             "    continue",
             "  fi",
             "  break",
             "done",
-            "printf '\\n%s\\n' \"Remote tmux connection ended with exit code ${status}.\"",
+            "printf '\\n%s\\n' \"Remote SSH connection ended with exit code ${status}.\"",
             "printf '%s\\n' 'This local window is intentionally left open.'",
             'exec "${SHELL:-/bin/bash}" -l',
         ]
@@ -539,7 +568,7 @@ def create_task_window(config: Config, task: Task) -> None:
             f"{config.local_session}:",
             "-n",
             window_name(task.arn),
-            local_window_command(config, task.arn),
+            local_ssh_window_command(config, task),
         ]
     ).stdout.strip()
 
@@ -547,7 +576,7 @@ def create_task_window(config: Config, task: Task) -> None:
     print(f"opened {window_name(task.arn)} for {task.arn}", flush=True)
 
 
-def poll_once(config: Config, warned_no_exec: set[str], warned_missing_container: set[str]) -> None:
+def poll_once(config: Config, warned_missing_container: set[str]) -> None:
     task_arns = list_running_task_arns(config)
     if not task_arns:
         return
@@ -562,13 +591,8 @@ def poll_once(config: Config, warned_no_exec: set[str], warned_missing_container
                 )
                 warned_missing_container.add(task.arn)
             continue
-        if not task.exec_enabled:
-            if task.arn not in warned_no_exec:
-                print(f"warn: task {task.arn} does not have ECS Exec enabled; skipping", file=sys.stderr)
-                warned_no_exec.add(task.arn)
-            continue
-        if not task.exec_agent_running:
-            print(f"waiting: task {task.arn} ECS Exec agent is not running yet", flush=True)
+        if not task.public_ip:
+            print(f"waiting: task {task.arn} does not have a public IP yet", flush=True)
             continue
         if task.arn in existing_windows:
             continue
@@ -577,10 +601,10 @@ def poll_once(config: Config, warned_no_exec: set[str], warned_missing_container
 
 def watch(config: Config) -> None:
     require_command("aws")
+    require_command("ssh")
     ensure_local_tmux_session(config)
     ensure_operation_window(config)
 
-    warned_no_exec: set[str] = set()
     warned_missing_container: set[str] = set()
     print(
         "watching "
@@ -591,7 +615,7 @@ def watch(config: Config) -> None:
 
     while True:
         try:
-            poll_once(config, warned_no_exec, warned_missing_container)
+            poll_once(config, warned_missing_container)
         except RuntimeError as err:
             print(f"warn: {err}", file=sys.stderr, flush=True)
 
