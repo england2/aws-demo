@@ -16,9 +16,14 @@ DEFAULT_CLUSTER = "ecs-cluster-agent-fargate"
 DEFAULT_CONTAINER = "agent-fargate"
 DEFAULT_REMOTE_SESSION = "agent-codex"
 DEFAULT_LOCAL_SESSION = "local-tmux-watch"
+DEFAULT_OPERATION_INSTANCE_NAME = "debian-agent-operation"
+DEFAULT_OPERATION_REMOTE_SESSION = "agent-operation"
+DEFAULT_OPERATION_USER = "admin"
 DEFAULT_STARTED_BY = "agent-conductor"
 DEFAULT_POLL_SECONDS = 5.0
 WINDOW_TASK_ARN_OPTION = "@local-tmux-watch-task-arn"
+WINDOW_ROLE_OPTION = "@local-tmux-watch-role"
+WINDOW_ROLE_OPERATION = "agent-operation"
 
 
 @dataclass(frozen=True)
@@ -28,6 +33,9 @@ class Config:
     container: str
     remote_session: str
     local_session: str
+    operation_instance_name: str
+    operation_remote_session: str
+    operation_user: str
     started_by: str
     poll_seconds: float
     once: bool
@@ -39,6 +47,7 @@ class Task:
     arn: str
     exec_enabled: bool
     has_container: bool
+    exec_agent_running: bool
 
 
 def env_value(name: str, default: str) -> str:
@@ -88,6 +97,21 @@ def parse_args(argv: list[str]) -> Config:
         default=env_value("LOCAL_TMUX_WATCH_LOCAL_SESSION", DEFAULT_LOCAL_SESSION),
     )
     parser.add_argument(
+        "--operation-instance-name",
+        default=env_value("LOCAL_TMUX_WATCH_OPERATION_INSTANCE_NAME", DEFAULT_OPERATION_INSTANCE_NAME),
+        help="EC2 Name tag for the agent-operation host.",
+    )
+    parser.add_argument(
+        "--operation-remote-session",
+        default=env_value("LOCAL_TMUX_WATCH_OPERATION_REMOTE_SESSION", DEFAULT_OPERATION_REMOTE_SESSION),
+        help="Remote tmux session to attach on the agent-operation host.",
+    )
+    parser.add_argument(
+        "--operation-user",
+        default=env_value("LOCAL_TMUX_WATCH_OPERATION_USER", DEFAULT_OPERATION_USER),
+        help="Remote user that owns the agent-operation tmux session.",
+    )
+    parser.add_argument(
         "--started-by",
         default=env_value("LOCAL_TMUX_WATCH_STARTED_BY", DEFAULT_STARTED_BY),
         help="ECS startedBy value to watch.",
@@ -119,6 +143,9 @@ def parse_args(argv: list[str]) -> Config:
         container=args.container,
         remote_session=args.remote_session,
         local_session=args.local_session,
+        operation_instance_name=args.operation_instance_name,
+        operation_remote_session=args.operation_remote_session,
+        operation_user=args.operation_user,
         started_by=args.started_by,
         poll_seconds=args.poll,
         once=args.once,
@@ -172,6 +199,26 @@ def in_tmux() -> bool:
     return bool(os.environ.get("TMUX"))
 
 
+def current_tmux_session() -> str | None:
+    if not in_tmux():
+        return None
+
+    result = run_text(["tmux", "display-message", "-p", "#{session_name}"], check=False)
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def current_tmux_window_id() -> str | None:
+    if not in_tmux():
+        return None
+
+    result = run_text(["tmux", "display-message", "-p", "#{window_id}"], check=False)
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
 def tmux_has_session(session_name: str) -> bool:
     return run_text(["tmux", "has-session", "-t", session_name], check=False).returncode == 0
 
@@ -191,6 +238,7 @@ def reexec_under_tmux(config: Config) -> None:
 def ensure_local_tmux_session(config: Config) -> None:
     require_command("tmux")
     if tmux_has_session(config.local_session):
+        ensure_current_watcher_window(config)
         return
 
     run_text(
@@ -204,6 +252,112 @@ def ensure_local_tmux_session(config: Config) -> None:
             "watch",
         ]
     )
+    ensure_current_watcher_window(config)
+
+
+def ensure_current_watcher_window(config: Config) -> None:
+    if current_tmux_session() != config.local_session:
+        return
+
+    run_text(["tmux", "rename-window", "watch"], check=False)
+
+
+def existing_role_windows(config: Config) -> dict[str, str]:
+    result = run_text(
+        [
+            "tmux",
+            "list-windows",
+            "-t",
+            config.local_session,
+            "-F",
+            f"#{{window_id}}\t#{{{WINDOW_ROLE_OPTION}}}",
+        ]
+    )
+    windows: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            continue
+        window_id, _, role = line.partition("\t")
+        if role:
+            windows[role] = window_id
+    return windows
+
+
+def operation_attach_command(config: Config) -> str:
+    tmux_attach = shlex.join(["tmux", "attach-session", "-t", config.operation_remote_session])
+    sudo_attach = shlex.join(["sudo", "-iu", config.operation_user, "tmux", "attach-session", "-t", config.operation_remote_session])
+    inner = f"{sudo_attach} || {tmux_attach} || exec /bin/bash"
+    return f"/bin/bash -lc {shlex.quote(inner)}"
+
+
+def operation_window_command(config: Config) -> str:
+    describe_instances = shlex.join(
+        [
+            "aws",
+            "ec2",
+            "describe-instances",
+            "--region",
+            config.region,
+            "--filters",
+            f"Name=tag:Name,Values={config.operation_instance_name}",
+            "Name=instance-state-name,Values=running",
+            "--query",
+            "Reservations[].Instances[].InstanceId",
+            "--output",
+            "text",
+        ]
+    )
+    start_session = (
+        "aws ssm start-session"
+        f" --region {shlex.quote(config.region)}"
+        ' --target "${target}"'
+        " --document-name AWS-StartInteractiveCommand"
+        f" --parameters {shlex.quote(json.dumps({'command': [operation_attach_command(config)]}))}"
+    )
+    script = "\n".join(
+        [
+            f"printf '%s\\n' {shlex.quote('Locating ' + config.operation_instance_name)}",
+            f"targets=$({describe_instances})",
+            'target=$(printf "%s\\n" "${targets}" | awk \'NF { print $1; exit }\')',
+            'if [ -z "${target}" ]; then',
+            f"  printf '%s\\n' {shlex.quote('No running EC2 instance found for Name=' + config.operation_instance_name)} >&2",
+            '  exec "${SHELL:-/bin/bash}" -l',
+            "fi",
+            'printf "Connecting to %s\\n" "${target}"',
+            start_session,
+            "status=$?",
+            "printf '\\n%s\\n' \"agent-operation SSM session ended with exit code ${status}.\"",
+            'exec "${SHELL:-/bin/bash}" -l',
+        ]
+    )
+    return shlex.join(["/bin/bash", "-lc", script])
+
+
+def ensure_operation_window(config: Config) -> None:
+    if WINDOW_ROLE_OPERATION in existing_role_windows(config):
+        return
+
+    target = f"{config.local_session}:"
+    new_window_args = [
+        "tmux",
+        "new-window",
+        "-d",
+        "-P",
+        "-F",
+        "#{window_id}",
+        "-t",
+        target,
+        "-n",
+        "agent-operation",
+        operation_window_command(config),
+    ]
+    if current_tmux_session() == config.local_session:
+        target = current_tmux_window_id() or target
+        new_window_args[new_window_args.index("-t") + 1] = target
+        new_window_args.insert(2, "-b")
+
+    window_id = run_text(new_window_args).stdout.strip()
+    run_text(["tmux", "set-option", "-w", "-t", window_id, WINDOW_ROLE_OPTION, WINDOW_ROLE_OPERATION])
 
 
 def task_id(task_arn: str) -> str:
@@ -288,14 +442,23 @@ def describe_tasks(config: Config, task_arns: list[str]) -> list[Task]:
             if not arn:
                 continue
             containers = task.get("containers", [])
+            matching_containers = [container for container in containers if container.get("name") == config.container]
             tasks.append(
                 Task(
                     arn=arn,
                     exec_enabled=bool(task.get("enableExecuteCommand")),
-                    has_container=any(container.get("name") == config.container for container in containers),
+                    has_container=bool(matching_containers),
+                    exec_agent_running=any(exec_agent_running(container) for container in matching_containers),
                 )
             )
     return tasks
+
+
+def exec_agent_running(container: dict[str, Any]) -> bool:
+    for managed_agent in container.get("managedAgents", []):
+        if managed_agent.get("name") == "ExecuteCommandAgent" and managed_agent.get("lastStatus") == "RUNNING":
+            return True
+    return False
 
 
 def remote_attach_command(config: Config) -> str:
@@ -376,6 +539,9 @@ def poll_once(config: Config, warned_no_exec: set[str], warned_missing_container
                 print(f"warn: task {task.arn} does not have ECS Exec enabled; skipping", file=sys.stderr)
                 warned_no_exec.add(task.arn)
             continue
+        if not task.exec_agent_running:
+            print(f"waiting: task {task.arn} ECS Exec agent is not running yet", flush=True)
+            continue
         if task.arn in existing_windows:
             continue
         create_task_window(config, task)
@@ -384,6 +550,7 @@ def poll_once(config: Config, warned_no_exec: set[str], warned_missing_container
 def watch(config: Config) -> None:
     require_command("aws")
     ensure_local_tmux_session(config)
+    ensure_operation_window(config)
 
     warned_no_exec: set[str] = set()
     warned_missing_container: set[str] = set()
