@@ -9,11 +9,11 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func TestRecordSQSMessageAndDecideCreatesThenChainsCloudWatchAlarm(t *testing.T) {
+func TestProcessInboundSQSMessageCreatesThenChainsCloudWatchAlarm(t *testing.T) {
 	db := newTestDatabase(t)
 	ctx := context.Background()
 
-	first := recordSQSMessageAndDecide(ctx, db, testSQSMessage("sqs-1", "event-1", "2026-05-01T04:15:00Z"))
+	first := processInboundSQSMessage(ctx, db, testSQSMessage("sqs-1", "event-1", "2026-05-01T04:15:00Z"))
 	if first.Err != nil {
 		t.Fatalf("first result error: %v", first.Err)
 	}
@@ -27,7 +27,7 @@ func TestRecordSQSMessageAndDecideCreatesThenChainsCloudWatchAlarm(t *testing.T)
 		t.Fatalf("first JobStatus = %v, want created", first.Message.JobStatus)
 	}
 
-	second := recordSQSMessageAndDecide(ctx, db, testSQSMessage("sqs-2", "event-2", "2026-05-01T04:16:00Z"))
+	second := processInboundSQSMessage(ctx, db, testSQSMessage("sqs-2", "event-2", "2026-05-01T04:16:00Z"))
 	if second.Err != nil {
 		t.Fatalf("second result error: %v", second.Err)
 	}

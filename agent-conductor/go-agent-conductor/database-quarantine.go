@@ -8,7 +8,6 @@ import (
 	dbgen "agent-orchestrator/internal/db/generated"
 )
 
-
 func quarantineSQSMessage(ctx context.Context, db *sql.DB, queueSource string, externalMessageID string, receiptHandle string, rawBody string, reason string) DatabaseCommandResult {
 	if queueSource == "" {
 		queueSource = "unknown"
@@ -20,29 +19,18 @@ func quarantineSQSMessage(ctx context.Context, db *sql.DB, queueSource string, e
 		reason = "unspecified"
 	}
 
-	result, err := db.ExecContext(ctx, `
-		INSERT INTO quarantined_sqs_message (
-			queue_source,
-			external_message_id,
-			receipt_handle,
-			raw_body,
-			quarantine_reason
-		)
-		VALUES (?, ?, ?, ?, ?)
-	`, queueSource, nullablePlainString(externalMessageID), nullablePlainString(receiptHandle), rawBody, reason)
+	row, err := dbgen.New(db).CreateQuarantinedSQSMessage(ctx, dbgen.CreateQuarantinedSQSMessageParams{
+		QueueSource:       queueSource,
+		ExternalMessageID: sqlNullString(externalMessageID),
+		ReceiptHandle:     sqlNullString(receiptHandle),
+		RawBody:           rawBody,
+		QuarantineReason:  reason,
+	})
 	if err != nil {
 		return DatabaseCommandResult{Err: fmt.Errorf("insert quarantined sqs message: %w", err)}
 	}
 
-	id, err := result.LastInsertId()
-	if err != nil {
-		return DatabaseCommandResult{Err: fmt.Errorf("read quarantined sqs message id: %w", err)}
-	}
-
-	quarantined, err := selectQuarantinedSQSMessageByID(ctx, db, id)
-	if err != nil {
-		return DatabaseCommandResult{Err: err}
-	}
+	quarantined := databaseQuarantinedSQSMessageFromGenerated(row)
 
 	return DatabaseCommandResult{
 		QuarantinedMessage: &quarantined,

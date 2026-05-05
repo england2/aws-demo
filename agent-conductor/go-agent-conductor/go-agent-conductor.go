@@ -40,17 +40,13 @@ func main() {
 			if !ok {
 				return
 			}
-			// ai--
-			// I see that the record function is actually making decisions! This doesn't seem right at all.
-			result := RecordSQSMessageWithDatabase(ctx, databaseCommands, ticketCloudWatchSQSMessage)
+			result := ProcessInboundSQSMessageWithDatabase(ctx, databaseCommands, ticketCloudWatchSQSMessage)
 			if result.Err != nil {
-				fmt.Fprintf(os.Stderr, "record sqs message: %v\n", result.Err)
+				fmt.Fprintf(os.Stderr, "process inbound sqs message: %v\n", result.Err)
 				continue
 			}
 
-			// ai--
-			// YEP! We're literaly making decisions based on the record function! no good.
-			fmt.Printf("database decision: reason=%s shouldSpawnAgentJob=%t messageID=%d\n", result.Reason, result.ShouldSpawnAgentJob, result.Message.ID)
+			fmt.Printf("inbound sqs message processed: reason=%s shouldSpawnAgentJob=%t messageID=%d\n", result.Reason, result.ShouldSpawnAgentJob, result.Message.ID)
 			if result.AgentJob != nil {
 				fmt.Printf("agentJob: id=%d agentName=%s spawnSQSMessageID=%d\n", result.AgentJob.ID, result.AgentJob.AgentName, result.AgentJob.SpawnSQSMessageID)
 			}

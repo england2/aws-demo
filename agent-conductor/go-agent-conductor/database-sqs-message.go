@@ -9,7 +9,7 @@ import (
 	dbgen "agent-orchestrator/internal/db/generated"
 )
 
-func recordSQSMessageAndDecide(ctx context.Context, db *sql.DB, sqsMessage DatabaseSQSMessageInfo) DatabaseCommandResult {
+func processInboundSQSMessage(ctx context.Context, db *sql.DB, sqsMessage DatabaseSQSMessageInfo) DatabaseCommandResult {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return DatabaseCommandResult{Err: fmt.Errorf("begin database transaction: %w", err)}

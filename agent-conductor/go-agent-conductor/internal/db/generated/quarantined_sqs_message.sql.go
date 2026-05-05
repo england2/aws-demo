@@ -7,7 +7,62 @@ package dbgen
 
 import (
 	"context"
+	"database/sql"
 )
+
+const createQuarantinedSQSMessage = `-- name: CreateQuarantinedSQSMessage :one
+INSERT INTO quarantined_sqs_message (
+    queue_source,
+    external_message_id,
+    receipt_handle,
+    raw_body,
+    quarantine_reason
+)
+VALUES (
+    ?1,
+    ?2,
+    ?3,
+    ?4,
+    ?5
+)
+RETURNING
+    id,
+    queue_source,
+    external_message_id,
+    receipt_handle,
+    raw_body,
+    quarantine_reason,
+    created_at
+`
+
+type CreateQuarantinedSQSMessageParams struct {
+	QueueSource       string         `json:"queue_source"`
+	ExternalMessageID sql.NullString `json:"external_message_id"`
+	ReceiptHandle     sql.NullString `json:"receipt_handle"`
+	RawBody           string         `json:"raw_body"`
+	QuarantineReason  string         `json:"quarantine_reason"`
+}
+
+func (q *Queries) CreateQuarantinedSQSMessage(ctx context.Context, arg CreateQuarantinedSQSMessageParams) (QuarantinedSqsMessage, error) {
+	row := q.db.QueryRowContext(ctx, createQuarantinedSQSMessage,
+		arg.QueueSource,
+		arg.ExternalMessageID,
+		arg.ReceiptHandle,
+		arg.RawBody,
+		arg.QuarantineReason,
+	)
+	var i QuarantinedSqsMessage
+	err := row.Scan(
+		&i.ID,
+		&i.QueueSource,
+		&i.ExternalMessageID,
+		&i.ReceiptHandle,
+		&i.RawBody,
+		&i.QuarantineReason,
+		&i.CreatedAt,
+	)
+	return i, err
+}
 
 const getQuarantinedSQSMessageByID = `-- name: GetQuarantinedSQSMessageByID :one
 SELECT

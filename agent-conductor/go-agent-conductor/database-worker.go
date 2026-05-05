@@ -9,12 +9,12 @@ import (
 type DatabaseCommandKind string
 
 const (
-	DatabaseCommandRecordSQSMessage        DatabaseCommandKind = "record_sqs_message"
-	DatabaseCommandMarkAgentJobSpawned     DatabaseCommandKind = "mark_agent_job_spawned"
-	DatabaseCommandMarkAgentJobSpawnFailed DatabaseCommandKind = "mark_agent_job_spawn_failed"
-	DatabaseCommandQuarantineSQSMessage    DatabaseCommandKind = "quarantine_sqs_message"
-	DatabaseCommandUpdateAgentJobECSStatus DatabaseCommandKind = "update_agent_job_ecs_status"
-	DatabaseCommandMarkAgentJobTaskStopped DatabaseCommandKind = "mark_agent_job_task_stopped"
+	DatabaseCommandProcessInboundSQSMessage DatabaseCommandKind = "process_inbound_sqs_message"
+	DatabaseCommandMarkAgentJobSpawned      DatabaseCommandKind = "mark_agent_job_spawned"
+	DatabaseCommandMarkAgentJobSpawnFailed  DatabaseCommandKind = "mark_agent_job_spawn_failed"
+	DatabaseCommandQuarantineSQSMessage     DatabaseCommandKind = "quarantine_sqs_message"
+	DatabaseCommandUpdateAgentJobECSStatus  DatabaseCommandKind = "update_agent_job_ecs_status"
+	DatabaseCommandMarkAgentJobTaskStopped  DatabaseCommandKind = "mark_agent_job_task_stopped"
 )
 
 type DatabaseCommand struct {
@@ -70,9 +70,9 @@ func StartDatabaseWorker(ctx context.Context) (chan<- DatabaseCommand, error) {
 	return commands, nil
 }
 
-func RecordSQSMessageWithDatabase(ctx context.Context, commands chan<- DatabaseCommand, message DatabaseSQSMessageInfo) DatabaseCommandResult {
+func ProcessInboundSQSMessageWithDatabase(ctx context.Context, commands chan<- DatabaseCommand, message DatabaseSQSMessageInfo) DatabaseCommandResult {
 	command := DatabaseCommand{
-		Kind:       DatabaseCommandRecordSQSMessage,
+		Kind:       DatabaseCommandProcessInboundSQSMessage,
 		SQSMessage: message,
 	}
 
@@ -147,8 +147,8 @@ func handleDatabaseCommand(ctx context.Context, db *sql.DB, command DatabaseComm
 	var result DatabaseCommandResult
 
 	switch command.Kind {
-	case DatabaseCommandRecordSQSMessage:
-		result = recordSQSMessageAndDecide(ctx, db, command.SQSMessage)
+	case DatabaseCommandProcessInboundSQSMessage:
+		result = processInboundSQSMessage(ctx, db, command.SQSMessage)
 	case DatabaseCommandMarkAgentJobSpawned:
 		result = markAgentJobSpawned(ctx, db, command.AgentJobID, command.ECSTaskARN)
 	case DatabaseCommandMarkAgentJobSpawnFailed:
