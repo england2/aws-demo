@@ -31,6 +31,10 @@ const (
 	defaultSecurityGroupName = "agent-fargate-sg"
 	defaultTaskRoleName      = "agent-fargate-task-role"
 	defaultExecutionRoleName = "agent-fargate-execution-role"
+	defaultAgentJobID        = "manual-test"
+	defaultAgentName         = "agent-fargate-codex"
+	defaultAgentPrompt       = "manual Fargate test task"
+	defaultAgentEventsQueue  = "https://sqs.us-west-2.amazonaws.com/204772699175/agent-fargate-events"
 )
 
 func main() {
@@ -83,6 +87,7 @@ func main() {
 		ImageURI:         imageURI,
 		TaskRoleArn:      taskRoleArn,
 		ExecutionRoleArn: executionRoleArn,
+		RuntimeEnv:       settings.RuntimeEnv(),
 	})
 	if err != nil {
 		fatal(err)
@@ -138,6 +143,7 @@ func main() {
 	fmt.Printf("started task: %s\n", taskArn)
 	fmt.Printf("wrote %s\n", settings.StatePath)
 	fmt.Printf("connect with: %s\n", connectCommand)
+	fmt.Println("then run inside the container: /entrypoint.sh")
 }
 
 type settings struct {
@@ -150,6 +156,10 @@ type settings struct {
 	SecurityGroupName string
 	TaskRoleName      string
 	ExecutionRoleName string
+	AgentJobID        string
+	AgentName         string
+	AgentPrompt       string
+	AgentEventsQueue  string
 	StatePath         string
 }
 
@@ -159,6 +169,7 @@ type taskDefinitionConfig struct {
 	ImageURI         string
 	TaskRoleArn      string
 	ExecutionRoleArn string
+	RuntimeEnv       []ecstypes.KeyValuePair
 }
 
 func loadSettings() (settings, error) {
@@ -177,8 +188,22 @@ func loadSettings() (settings, error) {
 		SecurityGroupName: envDefault("AGENT_FARGATE_SECURITY_GROUP_NAME", defaultSecurityGroupName),
 		TaskRoleName:      envDefault("AGENT_FARGATE_TASK_ROLE_NAME", defaultTaskRoleName),
 		ExecutionRoleName: envDefault("AGENT_FARGATE_EXECUTION_ROLE_NAME", defaultExecutionRoleName),
+		AgentJobID:        envDefault("AGENT_JOB_ID", defaultAgentJobID),
+		AgentName:         envDefault("AGENT_NAME", defaultAgentName),
+		AgentPrompt:       envDefault("AGENT_PROMPT", defaultAgentPrompt),
+		AgentEventsQueue:  envDefault("AGENT_FARGATE_EVENTS_QUEUE_URL", defaultAgentEventsQueue),
 		StatePath:         expandHome(envDefault("AGENT_FARGATE_STATE_PATH", filepath.Join(home, "programming", "aws1", "scripts", "ignore.current-test-fargate.txt")), home),
 	}, nil
+}
+
+func (s settings) RuntimeEnv() []ecstypes.KeyValuePair {
+	return []ecstypes.KeyValuePair{
+		{Name: aws.String("AWS_REGION"), Value: aws.String(s.Region)},
+		{Name: aws.String("AGENT_JOB_ID"), Value: aws.String(s.AgentJobID)},
+		{Name: aws.String("AGENT_NAME"), Value: aws.String(s.AgentName)},
+		{Name: aws.String("AGENT_PROMPT"), Value: aws.String(s.AgentPrompt)},
+		{Name: aws.String("AGENT_FARGATE_EVENTS_QUEUE_URL"), Value: aws.String(s.AgentEventsQueue)},
+	}
 }
 
 func registerExecTestTaskDefinition(ctx context.Context, client *ecs.Client, cfg taskDefinitionConfig) (string, error) {
@@ -196,11 +221,12 @@ func registerExecTestTaskDefinition(ctx context.Context, client *ecs.Client, cfg
 		},
 		ContainerDefinitions: []ecstypes.ContainerDefinition{
 			{
-				Name:       aws.String(cfg.ContainerName),
-				Image:      aws.String(cfg.ImageURI),
-				Essential:  aws.Bool(true),
-				EntryPoint: []string{"/bin/bash", "-lc"},
-				Command:    []string{"trap : TERM INT; sleep infinity & wait"},
+				Name:        aws.String(cfg.ContainerName),
+				Image:       aws.String(cfg.ImageURI),
+				Essential:   aws.Bool(true),
+				EntryPoint:  []string{"/bin/bash", "-lc"},
+				Command:     []string{"trap : TERM INT; sleep infinity & wait"},
+				Environment: cfg.RuntimeEnv,
 			},
 		},
 	})
