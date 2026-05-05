@@ -2,7 +2,7 @@ version: "2"
 sql:
   - engine: "sqlite"
     schema: "database.sql"
-    queries: "sqlc/queries.sql"
+    queries: "sqlc/queries"
     gen:
       go:
         package: "dbgen"
