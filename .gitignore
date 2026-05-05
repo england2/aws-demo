@@ -22,3 +22,7 @@ ignore.*
 
 # ignore db if we test locally
 database-*.sqlite
+
+# ignore local files
+.envrc
+.local
