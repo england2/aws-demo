@@ -19,7 +19,7 @@ const (
 	DatabaseCommandMarkAgentJobSpawned     DatabaseCommandKind = "mark_agent_job_spawned"
 	DatabaseCommandMarkAgentJobSpawnFailed DatabaseCommandKind = "mark_agent_job_spawn_failed"
 	DatabaseCommandRecordAgentEvent        DatabaseCommandKind = "record_agent_event"
-	DatabaseCommandDiscardAgentEvent       DatabaseCommandKind = "discard_agent_event"
+	DatabaseCommandQuarantineSQSMessage    DatabaseCommandKind = "quarantine_sqs_message"
 	DatabaseCommandUpdateAgentJobECSStatus DatabaseCommandKind = "update_agent_job_ecs_status"
 	DatabaseCommandMarkAgentJobTaskStopped DatabaseCommandKind = "mark_agent_job_task_stopped"
 )
@@ -30,9 +30,10 @@ type DatabaseCommand struct {
 	AgentJobID        int64
 	AgentEvent        *agentproto.AgentEvent
 	AgentEventRawBody string
+	QueueSource       string
 	ExternalMessageID string
 	ReceiptHandle     string
-	DiscardReason     string
+	QuarantineReason  string
 	ECSTaskARN        string
 	ECSLastStatus     string
 	ECSStoppedReason  string
@@ -44,7 +45,7 @@ type DatabaseCommandResult struct {
 	Message             DatabaseSQSMessageInfo
 	AgentJob            *DatabaseAgentJobInfo
 	AgentEvent          *DatabaseAgentEventInfo
-	DiscardedAgentEvent *DatabaseDiscardedAgentEventInfo
+	QuarantinedMessage  *DatabaseQuarantinedSQSMessageInfo
 	ShouldSpawnAgentJob bool
 	DeleteSQSMessage    bool
 	Terminal            bool
@@ -53,7 +54,7 @@ type DatabaseCommandResult struct {
 }
 
 func StartDatabaseWorker(ctx context.Context) (chan<- DatabaseCommand, error) {
-	db, err := openConductorDB()
+	db, err := openConductorDB(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -111,13 +112,14 @@ func RecordAgentEventWithDatabase(ctx context.Context, commands chan<- DatabaseC
 	})
 }
 
-func DiscardAgentEventWithDatabase(ctx context.Context, commands chan<- DatabaseCommand, externalMessageID string, receiptHandle string, rawBody string, reason string) DatabaseCommandResult {
+func QuarantineSQSMessageWithDatabase(ctx context.Context, commands chan<- DatabaseCommand, queueSource string, externalMessageID string, receiptHandle string, rawBody string, reason string) DatabaseCommandResult {
 	return sendDatabaseCommand(ctx, commands, DatabaseCommand{
-		Kind:              DatabaseCommandDiscardAgentEvent,
+		Kind:              DatabaseCommandQuarantineSQSMessage,
+		QueueSource:       queueSource,
 		ExternalMessageID: externalMessageID,
 		ReceiptHandle:     receiptHandle,
 		AgentEventRawBody: rawBody,
-		DiscardReason:     reason,
+		QuarantineReason:  reason,
 	})
 }
 
@@ -170,8 +172,8 @@ func handleDatabaseCommand(ctx context.Context, db *sql.DB, command DatabaseComm
 		result = markAgentJobSpawnFailed(ctx, db, command.AgentJobID, command.FailureReason)
 	case DatabaseCommandRecordAgentEvent:
 		result = recordAgentEvent(ctx, db, command.AgentEvent, command.AgentEventRawBody)
-	case DatabaseCommandDiscardAgentEvent:
-		result = discardAgentEvent(ctx, db, command.ExternalMessageID, command.ReceiptHandle, command.AgentEventRawBody, command.DiscardReason)
+	case DatabaseCommandQuarantineSQSMessage:
+		result = quarantineSQSMessage(ctx, db, command.QueueSource, command.ExternalMessageID, command.ReceiptHandle, command.AgentEventRawBody, command.QuarantineReason)
 	case DatabaseCommandUpdateAgentJobECSStatus:
 		result = updateAgentJobECSStatus(ctx, db, command.AgentJobID, command.ECSLastStatus, command.ECSStoppedReason)
 	case DatabaseCommandMarkAgentJobTaskStopped:
@@ -184,27 +186,6 @@ func handleDatabaseCommand(ctx context.Context, db *sql.DB, command DatabaseComm
 	case command.Reply <- result:
 	case <-ctx.Done():
 	}
-}
-
-func openConductorDB() (*sql.DB, error) {
-	if db_path == "" {
-		return nil, fmt.Errorf("db_path is empty; call check_load_db first")
-	}
-
-	db, err := sql.Open("sqlite", db_path)
-	if err != nil {
-		return nil, fmt.Errorf("open database %s: %w", db_path, err)
-	}
-
-	if _, err := db.Exec(`
-		PRAGMA foreign_keys = ON;
-		PRAGMA busy_timeout = 5000;
-	`); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("configure database pragmas: %w", err)
-	}
-
-	return db, nil
 }
 
 func recordSQSMessageAndDecide(ctx context.Context, db *sql.DB, sqsMessage DatabaseSQSMessageInfo) DatabaseCommandResult {
@@ -503,7 +484,10 @@ func recordAgentEvent(ctx context.Context, db *sql.DB, event *agentproto.AgentEv
 	}
 }
 
-func discardAgentEvent(ctx context.Context, db *sql.DB, externalMessageID string, receiptHandle string, rawBody string, reason string) DatabaseCommandResult {
+func quarantineSQSMessage(ctx context.Context, db *sql.DB, queueSource string, externalMessageID string, receiptHandle string, rawBody string, reason string) DatabaseCommandResult {
+	if queueSource == "" {
+		queueSource = "unknown"
+	}
 	if rawBody == "" {
 		rawBody = "{}"
 	}
@@ -512,32 +496,33 @@ func discardAgentEvent(ctx context.Context, db *sql.DB, externalMessageID string
 	}
 
 	result, err := db.ExecContext(ctx, `
-		INSERT INTO discarded_agent_event (
+		INSERT INTO quarantined_sqs_message (
+			queue_source,
 			external_message_id,
 			receipt_handle,
 			raw_body,
-			discard_reason
+			quarantine_reason
 		)
-		VALUES (?, ?, ?, ?)
-	`, nullablePlainString(externalMessageID), nullablePlainString(receiptHandle), rawBody, reason)
+		VALUES (?, ?, ?, ?, ?)
+	`, queueSource, nullablePlainString(externalMessageID), nullablePlainString(receiptHandle), rawBody, reason)
 	if err != nil {
-		return DatabaseCommandResult{Err: fmt.Errorf("insert discarded agent event: %w", err)}
+		return DatabaseCommandResult{Err: fmt.Errorf("insert quarantined sqs message: %w", err)}
 	}
 
 	id, err := result.LastInsertId()
 	if err != nil {
-		return DatabaseCommandResult{Err: fmt.Errorf("read discarded agent event id: %w", err)}
+		return DatabaseCommandResult{Err: fmt.Errorf("read quarantined sqs message id: %w", err)}
 	}
 
-	discarded, err := selectDiscardedAgentEventByID(ctx, db, id)
+	quarantined, err := selectQuarantinedSQSMessageByID(ctx, db, id)
 	if err != nil {
 		return DatabaseCommandResult{Err: err}
 	}
 
 	return DatabaseCommandResult{
-		DiscardedAgentEvent: &discarded,
-		DeleteSQSMessage:    true,
-		Reason:              "discarded_agent_event",
+		QuarantinedMessage: &quarantined,
+		DeleteSQSMessage:   true,
+		Reason:             "quarantined_sqs_message",
 	}
 }
 
@@ -908,9 +893,9 @@ func selectAgentEventByEventID(ctx context.Context, tx *sql.Tx, eventID string) 
 	return event, nil
 }
 
-func selectDiscardedAgentEventByID(ctx context.Context, db *sql.DB, id int64) (DatabaseDiscardedAgentEventInfo, error) {
+func selectQuarantinedSQSMessageByID(ctx context.Context, db *sql.DB, id int64) (DatabaseQuarantinedSQSMessageInfo, error) {
 	var (
-		event             DatabaseDiscardedAgentEventInfo
+		message           DatabaseQuarantinedSQSMessageInfo
 		externalMessageID sql.NullString
 		receiptHandle     sql.NullString
 		createdAt         string
@@ -919,29 +904,31 @@ func selectDiscardedAgentEventByID(ctx context.Context, db *sql.DB, id int64) (D
 	if err := db.QueryRowContext(ctx, `
 		SELECT
 			id,
+			queue_source,
 			external_message_id,
 			receipt_handle,
 			raw_body,
-			discard_reason,
+			quarantine_reason,
 			created_at
-		FROM discarded_agent_event
+		FROM quarantined_sqs_message
 		WHERE id = ?
 	`, id).Scan(
-		&event.ID,
+		&message.ID,
+		&message.QueueSource,
 		&externalMessageID,
 		&receiptHandle,
-		&event.RawBody,
-		&event.DiscardReason,
+		&message.RawBody,
+		&message.QuarantineReason,
 		&createdAt,
 	); err != nil {
-		return DatabaseDiscardedAgentEventInfo{}, fmt.Errorf("select discarded agent event: %w", err)
+		return DatabaseQuarantinedSQSMessageInfo{}, fmt.Errorf("select quarantined sqs message: %w", err)
 	}
 
-	event.ExternalMessageID = stringFromNull(externalMessageID)
-	event.ReceiptHandle = stringFromNull(receiptHandle)
-	event.CreatedAt = mustParseDatabaseTime(createdAt)
+	message.ExternalMessageID = stringFromNull(externalMessageID)
+	message.ReceiptHandle = stringFromNull(receiptHandle)
+	message.CreatedAt = mustParseDatabaseTime(createdAt)
 
-	return event, nil
+	return message, nil
 }
 
 func selectSQSMessageByExternalMessageID(ctx context.Context, tx *sql.Tx, externalMessageID string) (DatabaseSQSMessageInfo, error) {

@@ -16,6 +16,8 @@ import (
 	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 )
 
+const queueSourceAgentFargateEvent = "agent_fargate_event"
+
 type AgentEventEnvelope struct {
 	Event             agentproto.AgentEvent
 	ReceiptHandle     string
@@ -157,14 +159,14 @@ func (router *AgentEventRouter) poll(ctx context.Context, messages chan<- AgentE
 func (router *AgentEventRouter) discardMessage(ctx context.Context, message sqstypes.Message, reason string) {
 	receiptHandle := aws.ToString(message.ReceiptHandle)
 	if receiptHandle == "" {
-		sendAgentEventRouterError(ctx, nil, fmt.Errorf("discard agent event message missing receipt handle"))
+		sendAgentEventRouterError(ctx, nil, fmt.Errorf("quarantine agent event message missing receipt handle"))
 		return
 	}
 
 	rawBody := aws.ToString(message.Body)
-	result := DiscardAgentEventWithDatabase(ctx, router.DatabaseCommands, aws.ToString(message.MessageId), receiptHandle, rawBody, reason)
+	result := QuarantineSQSMessageWithDatabase(ctx, router.DatabaseCommands, queueSourceAgentFargateEvent, aws.ToString(message.MessageId), receiptHandle, rawBody, reason)
 	if result.Err != nil {
-		sendAgentEventRouterError(ctx, nil, fmt.Errorf("record discarded agent event: %w", result.Err))
+		sendAgentEventRouterError(ctx, nil, fmt.Errorf("record quarantined agent event message: %w", result.Err))
 		return
 	}
 

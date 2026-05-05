@@ -11,13 +11,14 @@ func main() {
 
 	fmt.Println("Agent Conductor started!")
 
+	ctx := context.Background()
+
 	// fail early if the conductor cannot find or initialize a usable database.
-	if err := check_load_db(); err != nil {
+	if err := initializeRuntimeDatabase(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "load database: %v\n", err)
 		os.Exit(1)
 	}
 
-	ctx := context.Background()
 	databaseCommands, err := StartDatabaseWorker(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "start database worker: %v\n", err)
@@ -71,13 +72,16 @@ func main() {
 
 func spawnAndTrackAgentJob(ctx context.Context, databaseCommands chan<- DatabaseCommand, router *AgentEventRouter, agentJob DatabaseAgentJobInfo, message DatabaseSQSMessageInfo) bool {
 	agentJobID := strconv.FormatInt(agentJob.ID, 10)
+	debugSSHEnabled, debugSSHPublicKeySecret := DebugSSHRuntimeEnv()
 	agentConfig := AgentFargateJobConfig{
 		AWSFargateSpawnConfig: adhocAWSFargateSpawnConfig,
 		RuntimeEnv: AgentFargateRuntimeEnv{
-			AgentJobID:     agentJobID,
-			AgentName:      agentJob.AgentName,
-			Prompt:         buildAgentPrompt(agentJob, message),
-			EventsQueueURL: adhocAgentFargateEventsQueueURL,
+			AgentJobID:              agentJobID,
+			AgentName:               agentJob.AgentName,
+			Prompt:                  buildAgentPrompt(agentJob, message),
+			EventsQueueURL:          adhocAgentFargateEventsQueueURL,
+			DebugSSHEnabled:         debugSSHEnabled,
+			DebugSSHPublicKeySecret: debugSSHPublicKeySecret,
 		},
 	}
 

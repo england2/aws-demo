@@ -13,7 +13,7 @@ const (
 	AgentJobStatusDuplicate AgentJobStatus = "duplicate"
 )
 
-const databaseDir = "database"
+const databaseDir = "go-agent-conductor-runtime-database"
 
 type DatabaseSQSMessageInfo struct {
 	ID                  int64
@@ -65,11 +65,12 @@ type DatabaseAgentEventInfo struct {
 	ReceivedAt  time.Time
 }
 
-type DatabaseDiscardedAgentEventInfo struct {
+type DatabaseQuarantinedSQSMessageInfo struct {
 	ID                int64
+	QueueSource       string
 	ExternalMessageID *string
 	ReceiptHandle     *string
 	RawBody           string
-	DiscardReason     string
+	QuarantineReason  string
 	CreatedAt         time.Time
 }

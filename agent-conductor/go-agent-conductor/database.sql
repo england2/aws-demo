@@ -76,11 +76,12 @@ CREATE INDEX IF NOT EXISTS idx_agent_event_agent_job_id
 CREATE INDEX IF NOT EXISTS idx_agent_event_event_type
     ON agent_event(event_type);
 
-CREATE TABLE IF NOT EXISTS discarded_agent_event (
+CREATE TABLE IF NOT EXISTS quarantined_sqs_message (
     id INTEGER PRIMARY KEY,
+    queue_source TEXT NOT NULL,
     external_message_id TEXT,
     receipt_handle TEXT,
     raw_body TEXT NOT NULL,
-    discard_reason TEXT NOT NULL,
+    quarantine_reason TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

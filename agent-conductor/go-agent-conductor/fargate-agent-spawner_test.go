@@ -55,13 +55,52 @@ func TestBuildRunTaskInputUsesTerraformTaskDefinitionAndJobOverrides(t *testing.
 		"AGENT_PROMPT":                   "do the work",
 		"AGENT_FARGATE_EVENTS_QUEUE_URL": "https://sqs.us-west-2.amazonaws.com/204772699175/agent-fargate-events",
 	}
-	got := make(map[string]string, len(environment))
-	for _, pair := range environment {
-		got[aws.ToString(pair.Name)] = aws.ToString(pair.Value)
-	}
+	got := environmentMap(environment)
 	for key, value := range want {
 		if got[key] != value {
 			t.Fatalf("environment %s = %q, want %q", key, got[key], value)
 		}
 	}
+	if _, ok := got["DEBUG_SSH_ENABLED"]; ok {
+		t.Fatalf("DEBUG_SSH_ENABLED should not be present by default")
+	}
+}
+
+func TestBuildRunTaskInputIncludesDebugSSHEnvWhenEnabled(t *testing.T) {
+	input, err := BuildRunTaskInput(AgentFargateJobConfig{
+		AWSFargateSpawnConfig: AWSFargateSpawnConfig{
+			Region:         "us-west-2",
+			Cluster:        "ecs-cluster-agent-fargate",
+			TaskDefinition: "agent-fargate",
+			ContainerName:  "agent-fargate",
+			Subnets:        []string{"subnet-1"},
+			SecurityGroups: []string{"sg-1"},
+		},
+		RuntimeEnv: AgentFargateRuntimeEnv{
+			AgentJobID:              "42",
+			AgentName:               "agent-fargate-codex",
+			EventsQueueURL:          "https://sqs.us-west-2.amazonaws.com/204772699175/agent-fargate-events",
+			DebugSSHEnabled:         true,
+			DebugSSHPublicKeySecret: "debug_public_ssh_key",
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildRunTaskInput error: %v", err)
+	}
+
+	got := environmentMap(input.Overrides.ContainerOverrides[0].Environment)
+	if got["DEBUG_SSH_ENABLED"] != "true" {
+		t.Fatalf("DEBUG_SSH_ENABLED = %q, want true", got["DEBUG_SSH_ENABLED"])
+	}
+	if got["DEBUG_SSH_PUBLIC_KEY_SECRET_NAME"] != "debug_public_ssh_key" {
+		t.Fatalf("DEBUG_SSH_PUBLIC_KEY_SECRET_NAME = %q", got["DEBUG_SSH_PUBLIC_KEY_SECRET_NAME"])
+	}
+}
+
+func environmentMap(environment []ecstypes.KeyValuePair) map[string]string {
+	got := make(map[string]string, len(environment))
+	for _, pair := range environment {
+		got[aws.ToString(pair.Name)] = aws.ToString(pair.Value)
+	}
+	return got
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -28,10 +29,12 @@ type AgentFargateJobConfig struct {
 }
 
 type AgentFargateRuntimeEnv struct {
-	AgentJobID     string
-	AgentName      string
-	Prompt         string
-	EventsQueueURL string
+	AgentJobID              string
+	AgentName               string
+	Prompt                  string
+	EventsQueueURL          string
+	DebugSSHEnabled         bool
+	DebugSSHPublicKeySecret string
 }
 
 type AgentFargateSpawnResult struct {
@@ -139,12 +142,33 @@ func validateAgentFargateJobConfig(agentConfig AgentFargateJobConfig) error {
 }
 
 func (runtimeEnv AgentFargateRuntimeEnv) ECSEnvironment() []ecstypes.KeyValuePair {
-	return []ecstypes.KeyValuePair{
+	environment := []ecstypes.KeyValuePair{
 		{Name: aws.String("AGENT_JOB_ID"), Value: aws.String(runtimeEnv.AgentJobID)},
 		{Name: aws.String("AGENT_NAME"), Value: aws.String(runtimeEnv.AgentName)},
 		{Name: aws.String("AGENT_PROMPT"), Value: aws.String(runtimeEnv.Prompt)},
 		{Name: aws.String("AGENT_FARGATE_EVENTS_QUEUE_URL"), Value: aws.String(runtimeEnv.EventsQueueURL)},
 	}
+	if runtimeEnv.DebugSSHEnabled {
+		secretName := strings.TrimSpace(runtimeEnv.DebugSSHPublicKeySecret)
+		if secretName == "" {
+			secretName = "debug_public_ssh_key"
+		}
+		environment = append(
+			environment,
+			ecstypes.KeyValuePair{Name: aws.String("DEBUG_SSH_ENABLED"), Value: aws.String("true")},
+			ecstypes.KeyValuePair{Name: aws.String("DEBUG_SSH_PUBLIC_KEY_SECRET_NAME"), Value: aws.String(secretName)},
+		)
+	}
+	return environment
+}
+
+func DebugSSHRuntimeEnv() (bool, string) {
+	return truthyEnv("DEBUG_SSH_ENABLED"), getenvDefault("DEBUG_SSH_PUBLIC_KEY_SECRET_NAME", "debug_public_ssh_key")
+}
+
+func truthyEnv(name string) bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
+	return value == "1" || value == "true" || value == "yes" || value == "on"
 }
 
 func formatECSFailures(failures []ecstypes.Failure) string {

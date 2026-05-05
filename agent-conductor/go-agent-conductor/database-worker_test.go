@@ -106,30 +106,33 @@ func TestRecordAgentEventIsIdempotentAndMarksJobSucceeded(t *testing.T) {
 	}
 }
 
-func TestDiscardAgentEventRecordsPoisonMessage(t *testing.T) {
+func TestQuarantineSQSMessageRecordsPoisonMessage(t *testing.T) {
 	db := newTestDatabase(t)
 	ctx := context.Background()
 
-	result := discardAgentEvent(ctx, db, "sqs-event-1", "receipt-1", `{"job_id":"manual-test"}`, `parse agent job id "manual-test"`)
+	result := quarantineSQSMessage(ctx, db, queueSourceAgentFargateEvent, "sqs-event-1", "receipt-1", `{"job_id":"manual-test"}`, `parse agent job id "manual-test"`)
 	if result.Err != nil {
-		t.Fatalf("discardAgentEvent error: %v", result.Err)
+		t.Fatalf("quarantineSQSMessage error: %v", result.Err)
 	}
 	if !result.DeleteSQSMessage {
 		t.Fatalf("DeleteSQSMessage = false, want true")
 	}
-	if result.DiscardedAgentEvent == nil {
-		t.Fatalf("DiscardedAgentEvent is nil")
+	if result.QuarantinedMessage == nil {
+		t.Fatalf("QuarantinedMessage is nil")
 	}
-	if result.DiscardedAgentEvent.DiscardReason != `parse agent job id "manual-test"` {
-		t.Fatalf("DiscardReason = %q", result.DiscardedAgentEvent.DiscardReason)
+	if result.QuarantinedMessage.QueueSource != queueSourceAgentFargateEvent {
+		t.Fatalf("QueueSource = %q", result.QuarantinedMessage.QueueSource)
+	}
+	if result.QuarantinedMessage.QuarantineReason != `parse agent job id "manual-test"` {
+		t.Fatalf("QuarantineReason = %q", result.QuarantinedMessage.QuarantineReason)
 	}
 
 	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM discarded_agent_event WHERE external_message_id = ?`, "sqs-event-1").Scan(&count); err != nil {
-		t.Fatalf("count discarded agent event: %v", err)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM quarantined_sqs_message WHERE external_message_id = ?`, "sqs-event-1").Scan(&count); err != nil {
+		t.Fatalf("count quarantined sqs message: %v", err)
 	}
 	if count != 1 {
-		t.Fatalf("discarded event count = %d, want 1", count)
+		t.Fatalf("quarantined message count = %d, want 1", count)
 	}
 }
 
