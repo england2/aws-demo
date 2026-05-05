@@ -35,6 +35,7 @@ const (
 	defaultAgentName         = "agent-fargate-codex"
 	defaultAgentPrompt       = "manual Fargate test task"
 	defaultAgentEventsQueue  = "https://sqs.us-west-2.amazonaws.com/204772699175/agent-fargate-events"
+	defaultDebugSSHSecret    = "debug_public_ssh_key"
 )
 
 func main() {
@@ -160,6 +161,8 @@ type settings struct {
 	AgentName         string
 	AgentPrompt       string
 	AgentEventsQueue  string
+	DebugSSHEnabled   bool
+	DebugSSHSecret    string
 	StatePath         string
 }
 
@@ -192,18 +195,28 @@ func loadSettings() (settings, error) {
 		AgentName:         envDefault("AGENT_NAME", defaultAgentName),
 		AgentPrompt:       envDefault("AGENT_PROMPT", defaultAgentPrompt),
 		AgentEventsQueue:  envDefault("AGENT_FARGATE_EVENTS_QUEUE_URL", defaultAgentEventsQueue),
+		DebugSSHEnabled:   truthyEnv("DEBUG_SSH_ENABLED"),
+		DebugSSHSecret:    envDefault("DEBUG_SSH_PUBLIC_KEY_SECRET_NAME", defaultDebugSSHSecret),
 		StatePath:         expandHome(envDefault("AGENT_FARGATE_STATE_PATH", filepath.Join(home, "programming", "aws1", "scripts", "ignore.current-test-fargate.txt")), home),
 	}, nil
 }
 
 func (s settings) RuntimeEnv() []ecstypes.KeyValuePair {
-	return []ecstypes.KeyValuePair{
+	environment := []ecstypes.KeyValuePair{
 		{Name: aws.String("AWS_REGION"), Value: aws.String(s.Region)},
 		{Name: aws.String("AGENT_JOB_ID"), Value: aws.String(s.AgentJobID)},
 		{Name: aws.String("AGENT_NAME"), Value: aws.String(s.AgentName)},
 		{Name: aws.String("AGENT_PROMPT"), Value: aws.String(s.AgentPrompt)},
 		{Name: aws.String("AGENT_FARGATE_EVENTS_QUEUE_URL"), Value: aws.String(s.AgentEventsQueue)},
 	}
+	if s.DebugSSHEnabled {
+		environment = append(
+			environment,
+			ecstypes.KeyValuePair{Name: aws.String("DEBUG_SSH_ENABLED"), Value: aws.String("true")},
+			ecstypes.KeyValuePair{Name: aws.String("DEBUG_SSH_PUBLIC_KEY_SECRET_NAME"), Value: aws.String(s.DebugSSHSecret)},
+		)
+	}
+	return environment
 }
 
 func registerExecTestTaskDefinition(ctx context.Context, client *ecs.Client, cfg taskDefinitionConfig) (string, error) {
@@ -227,6 +240,13 @@ func registerExecTestTaskDefinition(ctx context.Context, client *ecs.Client, cfg
 				EntryPoint:  []string{"/bin/bash", "-lc"},
 				Command:     []string{"trap : TERM INT; sleep infinity & wait"},
 				Environment: cfg.RuntimeEnv,
+				PortMappings: []ecstypes.PortMapping{
+					{
+						ContainerPort: aws.Int32(22),
+						HostPort:      aws.Int32(22),
+						Protocol:      ecstypes.TransportProtocolTcp,
+					},
+				},
 			},
 		},
 	})
@@ -363,6 +383,11 @@ func envDefault(name string, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func truthyEnv(name string) bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
+	return value == "1" || value == "true" || value == "yes" || value == "on"
 }
 
 func expandHome(path string, home string) string {
