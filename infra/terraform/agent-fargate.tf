@@ -33,6 +33,14 @@ resource "aws_security_group" "agent_fargate" {
   description = "Network access for temporary agent-fargate test tasks"
   vpc_id      = data.aws_vpc.default.id
 
+  ingress {
+    description = "Debug SSH"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.ssh_allowed_cidr]
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -68,6 +76,8 @@ data "aws_iam_policy_document" "agent_fargate_secret_read" {
       "arn:aws:secretsmanager:${var.aws_region}:204772699175:secret:openai-key-aws-demo-agent-fargate-*",
       "arn:aws:secretsmanager:${var.aws_region}:204772699175:secret:fine-grained-gh-pat-aws-demo",
       "arn:aws:secretsmanager:${var.aws_region}:204772699175:secret:fine-grained-gh-pat-aws-demo-*",
+      "arn:aws:secretsmanager:${var.aws_region}:204772699175:secret:debug_public_ssh_key",
+      "arn:aws:secretsmanager:${var.aws_region}:204772699175:secret:debug_public_ssh_key-*",
     ]
   }
 }
@@ -163,6 +173,14 @@ resource "aws_ecs_task_definition" "agent_fargate" {
       name      = "agent-fargate"
       image     = "${aws_ecr_repository.agent_fargate.repository_url}:latest"
       essential = true
+
+      portMappings = [
+        {
+          containerPort = 22
+          hostPort      = 22
+          protocol      = "tcp"
+        }
+      ]
 
       logConfiguration = {
         logDriver = "awslogs"

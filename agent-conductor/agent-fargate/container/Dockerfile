@@ -57,6 +57,7 @@ RUN apt-get update \
         ncurses-bin \
         nodejs \
         npm \
+        openssh-server \
         procps \
         psmisc \
         python3 \
