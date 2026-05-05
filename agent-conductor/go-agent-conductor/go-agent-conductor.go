@@ -32,20 +32,24 @@ func main() {
 	}
 	go agentEventRouter.Run(ctx)
 
-	messages, errors := StartSQSPoller(ctx)
+	ticketCloudWatchSQSMessageQueue, errors := StartSQSPoller(ctx)
 
 	for {
 		select {
-		case message, ok := <-messages:
+		case ticketCloudWatchSQSMessage, ok := <-ticketCloudWatchSQSMessageQueue:
 			if !ok {
 				return
 			}
-			result := RecordSQSMessageWithDatabase(ctx, databaseCommands, message)
+			// ai--
+			// I see that the record function is actually making decisions! This doesn't seem right at all.
+			result := RecordSQSMessageWithDatabase(ctx, databaseCommands, ticketCloudWatchSQSMessage)
 			if result.Err != nil {
 				fmt.Fprintf(os.Stderr, "record sqs message: %v\n", result.Err)
 				continue
 			}
 
+			// ai--
+			// YEP! We're literaly making decisions based on the record function! no good.
 			fmt.Printf("database decision: reason=%s shouldSpawnAgentJob=%t messageID=%d\n", result.Reason, result.ShouldSpawnAgentJob, result.Message.ID)
 			if result.AgentJob != nil {
 				fmt.Printf("agentJob: id=%d agentName=%s spawnSQSMessageID=%d\n", result.AgentJob.ID, result.AgentJob.AgentName, result.AgentJob.SpawnSQSMessageID)
@@ -57,7 +61,7 @@ func main() {
 			}
 
 			if result.DeleteSQSMessage && durableHandlingSucceeded {
-				if err := DeleteSQSMessage(ctx, message.ReceiptHandle); err != nil {
+				if err := DeleteSQSMessage(ctx, ticketCloudWatchSQSMessage.ReceiptHandle); err != nil {
 					fmt.Fprintf(os.Stderr, "delete sqs message: %v\n", err)
 				}
 			}

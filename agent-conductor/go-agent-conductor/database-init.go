@@ -13,7 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-//go:embed database.sql
+//go:embed sqlc/database.sql
 var db_init string
 
 var db_path string

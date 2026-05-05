@@ -22,6 +22,13 @@ type SQSPoller struct {
 	visibilityTimeoutSeconds int32
 }
 
+type SQSPollerConfig struct {
+	QueueURL                 string
+	Region                   string
+	WaitTimeSeconds          int32
+	VisibilityTimeoutSeconds int32
+}
+
 func StartSQSPoller(ctx context.Context) (<-chan DatabaseSQSMessageInfo, <-chan error) {
 	messages := make(chan DatabaseSQSMessageInfo)
 	errors := make(chan error)
@@ -30,7 +37,7 @@ func StartSQSPoller(ctx context.Context) (<-chan DatabaseSQSMessageInfo, <-chan 
 		defer close(messages)
 		defer close(errors)
 
-		poller, err := NewSQSPoller(ctx)
+		poller, err := NewTicketCloudWatchSQSPoller(ctx)
 		if err != nil {
 			sendPollError(ctx, errors, err)
 			return
@@ -43,7 +50,7 @@ func StartSQSPoller(ctx context.Context) (<-chan DatabaseSQSMessageInfo, <-chan 
 }
 
 func DeleteSQSMessage(ctx context.Context, receiptHandle string) error {
-	poller, err := NewSQSPoller(ctx)
+	poller, err := NewTicketCloudWatchSQSPoller(ctx)
 	if err != nil {
 		return err
 	}
@@ -51,20 +58,12 @@ func DeleteSQSMessage(ctx context.Context, receiptHandle string) error {
 	return poller.DeleteMessage(ctx, receiptHandle)
 }
 
-func NewSQSPoller(ctx context.Context) (*SQSPoller, error) {
-	region := getenvDefault("AWS_REGION", "us-west-2")
-
-	awsConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
-	if err != nil {
-		return nil, fmt.Errorf("load aws config: %w", err)
-	}
-
-	return &SQSPoller{
-		client:                   sqs.NewFromConfig(awsConfig),
-		queueURL:                 getenvDefault("AGENT_OPERATION_QUEUE_URL", defaultQueueURL),
-		waitTimeSeconds:          int32FromEnv("AGENT_OPERATION_WAIT_TIME_SECONDS", 20),
-		visibilityTimeoutSeconds: int32FromEnv("AGENT_OPERATION_VISIBILITY_TIMEOUT_SECONDS", 60),
-	}, nil
+func NewTicketCloudWatchSQSPoller(ctx context.Context) (*SQSPoller, error) {
+	return NewSQSPoller(ctx, SQSPollerConfig{
+		QueueURL:                 getenvDefault("AGENT_OPERATION_QUEUE_URL", defaultQueueURL),
+		WaitTimeSeconds:          int32FromEnv("AGENT_OPERATION_WAIT_TIME_SECONDS", 20),
+		VisibilityTimeoutSeconds: int32FromEnv("AGENT_OPERATION_VISIBILITY_TIMEOUT_SECONDS", 60),
+	})
 }
 
 func (p *SQSPoller) Poll(ctx context.Context, messages chan<- DatabaseSQSMessageInfo, errors chan<- error) {
@@ -75,22 +74,14 @@ func (p *SQSPoller) Poll(ctx context.Context, messages chan<- DatabaseSQSMessage
 		default:
 		}
 
-		output, err := p.client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
-			QueueUrl: aws.String(p.queueURL),
-			// Only deal with one message at a time.
-			MaxNumberOfMessages:         1,
-			WaitTimeSeconds:             p.waitTimeSeconds,
-			VisibilityTimeout:           p.visibilityTimeoutSeconds,
-			MessageAttributeNames:       []string{"All"},
-			MessageSystemAttributeNames: []types.MessageSystemAttributeName{types.MessageSystemAttributeNameAll},
-		})
+		rawMessages, err := p.ReceiveMessages(ctx)
 		if err != nil {
-			sendPollError(ctx, errors, fmt.Errorf("receive sqs message: %w", err))
+			sendPollError(ctx, errors, err)
 			sleepUnlessCanceled(ctx, 5*time.Second)
 			continue
 		}
 
-		for _, message := range output.Messages {
+		for _, message := range rawMessages {
 			sqsMessage, err := parseSQSMessage(message)
 			if err != nil {
 				sendPollError(ctx, errors, err)
@@ -104,6 +95,50 @@ func (p *SQSPoller) Poll(ctx context.Context, messages chan<- DatabaseSQSMessage
 			}
 		}
 	}
+}
+
+func NewSQSPoller(ctx context.Context, pollerConfig SQSPollerConfig) (*SQSPoller, error) {
+	if pollerConfig.QueueURL == "" {
+		return nil, fmt.Errorf("SQS queue URL is required")
+	}
+	if pollerConfig.Region == "" {
+		pollerConfig.Region = getenvDefault("AWS_REGION", "us-west-2")
+	}
+	if pollerConfig.WaitTimeSeconds == 0 {
+		pollerConfig.WaitTimeSeconds = 20
+	}
+	if pollerConfig.VisibilityTimeoutSeconds == 0 {
+		pollerConfig.VisibilityTimeoutSeconds = 60
+	}
+
+	awsConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion(pollerConfig.Region))
+	if err != nil {
+		return nil, fmt.Errorf("load aws config: %w", err)
+	}
+
+	return &SQSPoller{
+		client:                   sqs.NewFromConfig(awsConfig),
+		queueURL:                 pollerConfig.QueueURL,
+		waitTimeSeconds:          pollerConfig.WaitTimeSeconds,
+		visibilityTimeoutSeconds: pollerConfig.VisibilityTimeoutSeconds,
+	}, nil
+}
+
+func (p *SQSPoller) ReceiveMessages(ctx context.Context) ([]types.Message, error) {
+	output, err := p.client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
+		QueueUrl: aws.String(p.queueURL),
+		// Only deal with one message at a time.
+		MaxNumberOfMessages:         1,
+		WaitTimeSeconds:             p.waitTimeSeconds,
+		VisibilityTimeout:           p.visibilityTimeoutSeconds,
+		MessageAttributeNames:       []string{"All"},
+		MessageSystemAttributeNames: []types.MessageSystemAttributeName{types.MessageSystemAttributeNameAll},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("receive sqs message: %w", err)
+	}
+
+	return output.Messages, nil
 }
 
 func (p *SQSPoller) DeleteMessage(ctx context.Context, receiptHandle string) error {

@@ -12,7 +12,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
-	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 )
 
@@ -40,8 +39,7 @@ type RunningFargateAgent struct {
 }
 
 type AgentEventRouter struct {
-	client           *sqs.Client
-	queueURL         string
+	poller           *SQSPoller
 	DatabaseCommands chan<- DatabaseCommand
 	Agents           map[string]chan<- AgentEventEnvelope
 	Register         chan RunningFargateAgentRegistration
@@ -58,14 +56,15 @@ func StartAgentEventRouter(ctx context.Context, databaseCommands chan<- Database
 		return nil, fmt.Errorf("agent event queue URL is required")
 	}
 
-	awsConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion(getenvDefault("AWS_REGION", "us-west-2")))
+	poller, err := NewSQSPoller(ctx, SQSPollerConfig{
+		QueueURL: queueURL,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("load AWS config for agent event router: %w", err)
+		return nil, fmt.Errorf("create agent event queue poller: %w", err)
 	}
 
 	return &AgentEventRouter{
-		client:           sqs.NewFromConfig(awsConfig),
-		queueURL:         queueURL,
+		poller:           poller,
 		DatabaseCommands: databaseCommands,
 		Agents:           make(map[string]chan<- AgentEventEnvelope),
 		Register:         make(chan RunningFargateAgentRegistration),
@@ -106,11 +105,7 @@ func (router *AgentEventRouter) routeEnvelope(ctx context.Context, envelope Agen
 		return
 	}
 
-	result := RecordAgentEventWithDatabase(ctx, router.DatabaseCommands, envelope.Event, envelope.RawBody)
-	if result.Err != nil {
-		fmt.Fprintf(os.Stderr, "record unrouted agent event: %v\n", result.Err)
-		return
-	}
+	fmt.Fprintf(os.Stderr, "discard unrouted agent event: jobID=%s type=%s eventID=%s\n", envelope.Event.JobID, envelope.Event.Type, envelope.Event.EventID)
 
 	if err := router.DeleteMessage(ctx, envelope.ReceiptHandle); err != nil {
 		fmt.Fprintf(os.Stderr, "delete unrouted agent event: %v\n", err)
@@ -125,21 +120,14 @@ func (router *AgentEventRouter) poll(ctx context.Context, messages chan<- AgentE
 		default:
 		}
 
-		output, err := router.client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
-			QueueUrl:                    aws.String(router.queueURL),
-			MaxNumberOfMessages:         1,
-			WaitTimeSeconds:             20,
-			VisibilityTimeout:           60,
-			MessageAttributeNames:       []string{"All"},
-			MessageSystemAttributeNames: []sqstypes.MessageSystemAttributeName{sqstypes.MessageSystemAttributeNameAll},
-		})
+		rawMessages, err := router.poller.ReceiveMessages(ctx)
 		if err != nil {
 			sendAgentEventRouterError(ctx, errors, fmt.Errorf("receive agent event message: %w", err))
 			sleepUnlessCanceled(ctx, 5*time.Second)
 			continue
 		}
 
-		for _, message := range output.Messages {
+		for _, message := range rawMessages {
 			envelope, err := ParseAgentEventSQSMessage(message)
 			if err != nil {
 				sendAgentEventRouterError(ctx, errors, err)
@@ -180,11 +168,7 @@ func (router *AgentEventRouter) DeleteMessage(ctx context.Context, receiptHandle
 		return fmt.Errorf("agent event receipt handle is required")
 	}
 
-	_, err := router.client.DeleteMessage(ctx, &sqs.DeleteMessageInput{
-		QueueUrl:      aws.String(router.queueURL),
-		ReceiptHandle: aws.String(receiptHandle),
-	})
-	if err != nil {
+	if err := router.poller.DeleteMessage(ctx, receiptHandle); err != nil {
 		return fmt.Errorf("delete agent event message: %w", err)
 	}
 
@@ -239,7 +223,7 @@ func (agent *RunningFargateAgent) Run(ctx context.Context) {
 	for {
 		select {
 		case envelope := <-agent.AgentEvents:
-			if agent.RespondAgentEvent(ctx, envelope) {
+			if agent.ManageAgent(ctx, envelope) {
 				return
 			}
 		case <-ticker.C:
@@ -252,14 +236,71 @@ func (agent *RunningFargateAgent) Run(ctx context.Context) {
 	}
 }
 
-func (agent *RunningFargateAgent) RespondAgentEvent(ctx context.Context, envelope AgentEventEnvelope) bool {
+// ManageAgent is the per-running-agent controller brain.
+//
+// The Fargate task and the codex wrapper emit events that describe what the
+// remote agent process is doing. This function handles one such event inside the
+// RunningFargateAgent loop. The important design constraint is that a single
+// RunningFargateAgent should have one serialized decision point for runtime
+// behavior: helper goroutines may gather facts or feed channels, but they should
+// not independently decide how to respond to the agent.
+//
+// Agent events are recorded in the database first so the conductor keeps a
+// durable history and the database layer can update durable job state. After
+// that write succeeds, this controller may react to the event in memory. Those
+// reactions are intentionally non-durable. If the conductor process dies, any
+// in-flight runtime reaction can be lost; rebuilding a durable workflow engine
+// for already-running Fargate processes is not a goal here.
+//
+// As this grows, keep agent-event handling and ECS/task-lifecycle handling close
+// together in this same control loop. The intended shape is one select loop that
+// receives agent events, ECS observations, timer ticks, and cancellation, then
+// dispatches each stream through explicit switches. That keeps one "brain" in
+// charge of a running agent instead of splitting behavior across competing
+// goroutines.
+//
+// The eventual shape should look roughly like this:
+//
+//	// ecsEvents is fed by helper goroutines that only observe ECS and report facts.
+//	// They do not decide whether to stop, unregister, retry, or mutate agent state.
+//	ecsEvents := make(chan ECSAgentEvent)
+//	go agent.watchECSEvents(ctx, ecsEvents)
+//
+//	for {
+//		select {
+//		case envelope := <-agent.AgentEvents:
+//			result := agent.manageAgentEvent(ctx, envelope)
+//			switch envelope.Event.Type {
+//			case agentproto.AgentWrapperStarted:
+//			case agentproto.AgentSetupStarted:
+//			case agentproto.AgentSetupFailed:
+//			case agentproto.CodexStarted:
+//			case agentproto.CodexExited:
+//			case agentproto.AgentReportedSuccess:
+//			case agentproto.AgentReportedFailure:
+//			case agentproto.PullRequestCreated:
+//			case agentproto.JobCompleted:
+//			case agentproto.JobFailed:
+//			}
+//			if result.Terminal {
+//				return
+//			}
+//
+//		case ecsEvent := <-ecsEvents:
+//			switch ecsEvent.Type {
+//			case ECSAgentTaskStatusChanged:
+//			case ECSAgentTaskStopped:
+//			}
+//
+//		case <-ticker.C:
+//			agent.pollECSStatus(ctx, ecsEvents)
+//
+//		case <-ctx.Done():
+//			return
+//		}
+//	}
+func (agent *RunningFargateAgent) ManageAgent(ctx context.Context, envelope AgentEventEnvelope) bool {
 	fmt.Printf("agent event: jobID=%s type=%s eventID=%s\n", envelope.Event.JobID, envelope.Event.Type, envelope.Event.EventID)
-
-	result := RecordAgentEventWithDatabase(ctx, agent.DatabaseCommands, envelope.Event, envelope.RawBody)
-	if result.Err != nil {
-		fmt.Fprintf(os.Stderr, "record agent event: %v\n", result.Err)
-		return false
-	}
 
 	if err := agent.deleteAgentEventMessage(ctx, envelope.ReceiptHandle); err != nil {
 		fmt.Fprintf(os.Stderr, "delete agent event message: %v\n", err)
@@ -275,10 +316,12 @@ func (agent *RunningFargateAgent) RespondAgentEvent(ctx context.Context, envelop
 	case agentproto.AgentReportedFailure:
 	case agentproto.PullRequestCreated:
 	case agentproto.JobCompleted:
+		return true
 	case agentproto.JobFailed:
+		return true
 	}
 
-	return result.Terminal
+	return false
 }
 
 func (agent *RunningFargateAgent) PollECSStatus(ctx context.Context) bool {
