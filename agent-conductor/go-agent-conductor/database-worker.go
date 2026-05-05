@@ -19,6 +19,7 @@ const (
 	DatabaseCommandMarkAgentJobSpawned     DatabaseCommandKind = "mark_agent_job_spawned"
 	DatabaseCommandMarkAgentJobSpawnFailed DatabaseCommandKind = "mark_agent_job_spawn_failed"
 	DatabaseCommandRecordAgentEvent        DatabaseCommandKind = "record_agent_event"
+	DatabaseCommandDiscardAgentEvent       DatabaseCommandKind = "discard_agent_event"
 	DatabaseCommandUpdateAgentJobECSStatus DatabaseCommandKind = "update_agent_job_ecs_status"
 	DatabaseCommandMarkAgentJobTaskStopped DatabaseCommandKind = "mark_agent_job_task_stopped"
 )
@@ -29,6 +30,9 @@ type DatabaseCommand struct {
 	AgentJobID        int64
 	AgentEvent        *agentproto.AgentEvent
 	AgentEventRawBody string
+	ExternalMessageID string
+	ReceiptHandle     string
+	DiscardReason     string
 	ECSTaskARN        string
 	ECSLastStatus     string
 	ECSStoppedReason  string
@@ -40,6 +44,7 @@ type DatabaseCommandResult struct {
 	Message             DatabaseSQSMessageInfo
 	AgentJob            *DatabaseAgentJobInfo
 	AgentEvent          *DatabaseAgentEventInfo
+	DiscardedAgentEvent *DatabaseDiscardedAgentEventInfo
 	ShouldSpawnAgentJob bool
 	DeleteSQSMessage    bool
 	Terminal            bool
@@ -106,6 +111,16 @@ func RecordAgentEventWithDatabase(ctx context.Context, commands chan<- DatabaseC
 	})
 }
 
+func DiscardAgentEventWithDatabase(ctx context.Context, commands chan<- DatabaseCommand, externalMessageID string, receiptHandle string, rawBody string, reason string) DatabaseCommandResult {
+	return sendDatabaseCommand(ctx, commands, DatabaseCommand{
+		Kind:              DatabaseCommandDiscardAgentEvent,
+		ExternalMessageID: externalMessageID,
+		ReceiptHandle:     receiptHandle,
+		AgentEventRawBody: rawBody,
+		DiscardReason:     reason,
+	})
+}
+
 func UpdateAgentJobECSStatus(ctx context.Context, commands chan<- DatabaseCommand, agentJobID int64, lastStatus string, stoppedReason string) DatabaseCommandResult {
 	return sendDatabaseCommand(ctx, commands, DatabaseCommand{
 		Kind:             DatabaseCommandUpdateAgentJobECSStatus,
@@ -155,6 +170,8 @@ func handleDatabaseCommand(ctx context.Context, db *sql.DB, command DatabaseComm
 		result = markAgentJobSpawnFailed(ctx, db, command.AgentJobID, command.FailureReason)
 	case DatabaseCommandRecordAgentEvent:
 		result = recordAgentEvent(ctx, db, command.AgentEvent, command.AgentEventRawBody)
+	case DatabaseCommandDiscardAgentEvent:
+		result = discardAgentEvent(ctx, db, command.ExternalMessageID, command.ReceiptHandle, command.AgentEventRawBody, command.DiscardReason)
 	case DatabaseCommandUpdateAgentJobECSStatus:
 		result = updateAgentJobECSStatus(ctx, db, command.AgentJobID, command.ECSLastStatus, command.ECSStoppedReason)
 	case DatabaseCommandMarkAgentJobTaskStopped:
@@ -483,6 +500,44 @@ func recordAgentEvent(ctx context.Context, db *sql.DB, event *agentproto.AgentEv
 		AgentEvent: &insertedEvent,
 		Terminal:   isTerminalAgentJobStatus(agentJob.Status),
 		Reason:     reason,
+	}
+}
+
+func discardAgentEvent(ctx context.Context, db *sql.DB, externalMessageID string, receiptHandle string, rawBody string, reason string) DatabaseCommandResult {
+	if rawBody == "" {
+		rawBody = "{}"
+	}
+	if reason == "" {
+		reason = "unspecified"
+	}
+
+	result, err := db.ExecContext(ctx, `
+		INSERT INTO discarded_agent_event (
+			external_message_id,
+			receipt_handle,
+			raw_body,
+			discard_reason
+		)
+		VALUES (?, ?, ?, ?)
+	`, nullablePlainString(externalMessageID), nullablePlainString(receiptHandle), rawBody, reason)
+	if err != nil {
+		return DatabaseCommandResult{Err: fmt.Errorf("insert discarded agent event: %w", err)}
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return DatabaseCommandResult{Err: fmt.Errorf("read discarded agent event id: %w", err)}
+	}
+
+	discarded, err := selectDiscardedAgentEventByID(ctx, db, id)
+	if err != nil {
+		return DatabaseCommandResult{Err: err}
+	}
+
+	return DatabaseCommandResult{
+		DiscardedAgentEvent: &discarded,
+		DeleteSQSMessage:    true,
+		Reason:              "discarded_agent_event",
 	}
 }
 
@@ -849,6 +904,42 @@ func selectAgentEventByEventID(ctx context.Context, tx *sql.Tx, eventID string) 
 	event.ArtifactURL = stringFromNull(artifactURL)
 	event.CreatedAt = timeFromNull(createdAt)
 	event.ReceivedAt = mustParseDatabaseTime(receivedAt)
+
+	return event, nil
+}
+
+func selectDiscardedAgentEventByID(ctx context.Context, db *sql.DB, id int64) (DatabaseDiscardedAgentEventInfo, error) {
+	var (
+		event             DatabaseDiscardedAgentEventInfo
+		externalMessageID sql.NullString
+		receiptHandle     sql.NullString
+		createdAt         string
+	)
+
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			id,
+			external_message_id,
+			receipt_handle,
+			raw_body,
+			discard_reason,
+			created_at
+		FROM discarded_agent_event
+		WHERE id = ?
+	`, id).Scan(
+		&event.ID,
+		&externalMessageID,
+		&receiptHandle,
+		&event.RawBody,
+		&event.DiscardReason,
+		&createdAt,
+	); err != nil {
+		return DatabaseDiscardedAgentEventInfo{}, fmt.Errorf("select discarded agent event: %w", err)
+	}
+
+	event.ExternalMessageID = stringFromNull(externalMessageID)
+	event.ReceiptHandle = stringFromNull(receiptHandle)
+	event.CreatedAt = mustParseDatabaseTime(createdAt)
 
 	return event, nil
 }

@@ -112,7 +112,11 @@ func validateDatabase(path string) error {
 		return fmt.Errorf("ping database %s: %w", path, err)
 	}
 
-	requiredTables := []string{"sqs_messages_tickets_cloudwatch", "agent_job_info", "agent_event"}
+	if _, err := db.Exec(db_init); err != nil {
+		return fmt.Errorf("apply database schema %s: %w", path, err)
+	}
+
+	requiredTables := []string{"sqs_messages_tickets_cloudwatch", "agent_job_info", "agent_event", "discarded_agent_event"}
 	for _, table := range requiredTables {
 		var count int
 		err := db.QueryRow(
@@ -134,6 +138,9 @@ func validateDatabase(path string) error {
 		return err
 	}
 	if err := validateAgentEventShape(db); err != nil {
+		return err
+	}
+	if err := validateDiscardedAgentEventShape(db); err != nil {
 		return err
 	}
 
@@ -326,6 +333,48 @@ func validateAgentEventShape(db *sql.DB) error {
 			&receivedAt,
 		); err != nil {
 			return fmt.Errorf("deserialize agent_event sample: %w", err)
+		}
+	}
+
+	return rows.Err()
+}
+
+func validateDiscardedAgentEventShape(db *sql.DB) error {
+	rows, err := db.Query(`
+		SELECT
+			id,
+			external_message_id,
+			receipt_handle,
+			raw_body,
+			discard_reason,
+			created_at
+		FROM discarded_agent_event
+		LIMIT 1
+	`)
+	if err != nil {
+		return fmt.Errorf("validate discarded_agent_event shape: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			id                int64
+			externalMessageID sql.NullString
+			receiptHandle     sql.NullString
+			rawBody           string
+			discardReason     string
+			createdAt         string
+		)
+
+		if err := rows.Scan(
+			&id,
+			&externalMessageID,
+			&receiptHandle,
+			&rawBody,
+			&discardReason,
+			&createdAt,
+		); err != nil {
+			return fmt.Errorf("deserialize discarded_agent_event sample: %w", err)
 		}
 	}
 

@@ -75,3 +75,12 @@ CREATE INDEX IF NOT EXISTS idx_agent_event_agent_job_id
 
 CREATE INDEX IF NOT EXISTS idx_agent_event_event_type
     ON agent_event(event_type);
+
+CREATE TABLE IF NOT EXISTS discarded_agent_event (
+    id INTEGER PRIMARY KEY,
+    external_message_id TEXT,
+    receipt_handle TEXT,
+    raw_body TEXT NOT NULL,
+    discard_reason TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

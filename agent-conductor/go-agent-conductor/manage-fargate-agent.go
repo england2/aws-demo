@@ -141,6 +141,7 @@ func (router *AgentEventRouter) poll(ctx context.Context, messages chan<- AgentE
 			envelope, err := ParseAgentEventSQSMessage(message)
 			if err != nil {
 				sendAgentEventRouterError(ctx, errors, err)
+				router.discardMessage(ctx, message, err.Error())
 				continue
 			}
 
@@ -150,6 +151,25 @@ func (router *AgentEventRouter) poll(ctx context.Context, messages chan<- AgentE
 				return
 			}
 		}
+	}
+}
+
+func (router *AgentEventRouter) discardMessage(ctx context.Context, message sqstypes.Message, reason string) {
+	receiptHandle := aws.ToString(message.ReceiptHandle)
+	if receiptHandle == "" {
+		sendAgentEventRouterError(ctx, nil, fmt.Errorf("discard agent event message missing receipt handle"))
+		return
+	}
+
+	rawBody := aws.ToString(message.Body)
+	result := DiscardAgentEventWithDatabase(ctx, router.DatabaseCommands, aws.ToString(message.MessageId), receiptHandle, rawBody, reason)
+	if result.Err != nil {
+		sendAgentEventRouterError(ctx, nil, fmt.Errorf("record discarded agent event: %w", result.Err))
+		return
+	}
+
+	if err := router.DeleteMessage(ctx, receiptHandle); err != nil {
+		sendAgentEventRouterError(ctx, nil, err)
 	}
 }
 
@@ -176,6 +196,9 @@ func ParseAgentEventSQSMessage(message sqstypes.Message) (AgentEventEnvelope, er
 
 	var event agentproto.AgentEvent
 	if err := json.Unmarshal([]byte(*message.Body), &event); err != nil {
+		return AgentEventEnvelope{}, fmt.Errorf("parse agent event SQS message %s: %w", aws.ToString(message.MessageId), err)
+	}
+	if _, err := parseAgentJobIDForDB(event.JobID); err != nil {
 		return AgentEventEnvelope{}, fmt.Errorf("parse agent event SQS message %s: %w", aws.ToString(message.MessageId), err)
 	}
 
@@ -303,6 +326,13 @@ func (agent *RunningFargateAgent) PollECSStatus(ctx context.Context) bool {
 }
 
 func sendAgentEventRouterError(ctx context.Context, errors chan<- error, err error) {
+	if errors == nil {
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "agent event router: %v\n", err)
+		}
+		return
+	}
+
 	select {
 	case errors <- err:
 	case <-ctx.Done():

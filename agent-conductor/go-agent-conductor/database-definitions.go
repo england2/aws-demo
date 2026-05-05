@@ -64,3 +64,12 @@ type DatabaseAgentEventInfo struct {
 	CreatedAt   *time.Time
 	ReceivedAt  time.Time
 }
+
+type DatabaseDiscardedAgentEventInfo struct {
+	ID                int64
+	ExternalMessageID *string
+	ReceiptHandle     *string
+	RawBody           string
+	DiscardReason     string
+	CreatedAt         time.Time
+}
