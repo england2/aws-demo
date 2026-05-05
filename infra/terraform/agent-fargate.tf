@@ -64,7 +64,9 @@ data "aws_iam_policy_document" "agent_fargate_secret_read" {
     ]
 
     resources = [
+      "arn:aws:secretsmanager:${var.aws_region}:204772699175:secret:openai-key-aws-demo-agent-fargate",
       "arn:aws:secretsmanager:${var.aws_region}:204772699175:secret:openai-key-aws-demo-agent-fargate-*",
+      "arn:aws:secretsmanager:${var.aws_region}:204772699175:secret:fine-grained-gh-pat-aws-demo",
       "arn:aws:secretsmanager:${var.aws_region}:204772699175:secret:fine-grained-gh-pat-aws-demo-*",
     ]
   }
