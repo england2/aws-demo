@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	dbgen "agent-orchestrator/internal/db/generated"
 	"agentproto"
 )
 
@@ -844,240 +845,116 @@ func insertAgentEvent(ctx context.Context, tx *sql.Tx, agentJobID int64, event a
 }
 
 func selectAgentEventByEventID(ctx context.Context, tx *sql.Tx, eventID string) (DatabaseAgentEventInfo, error) {
-	var (
-		event       DatabaseAgentEventInfo
-		message     sql.NullString
-		reportPath  sql.NullString
-		artifactURL sql.NullString
-		createdAt   sql.NullString
-		receivedAt  string
-	)
-
-	if err := tx.QueryRowContext(ctx, `
-		SELECT
-			id,
-			event_id,
-			agent_job_id,
-			agent_name,
-			event_type,
-			message,
-			report_path,
-			artifact_url,
-			raw_body,
-			created_at,
-			received_at
-		FROM agent_event
-		WHERE event_id = ?
-	`, eventID).Scan(
-		&event.ID,
-		&event.EventID,
-		&event.AgentJobID,
-		&event.AgentName,
-		&event.EventType,
-		&message,
-		&reportPath,
-		&artifactURL,
-		&event.RawBody,
-		&createdAt,
-		&receivedAt,
-	); err != nil {
+	event, err := dbgen.New(tx).GetAgentEventByEventID(ctx, eventID)
+	if err != nil {
 		return DatabaseAgentEventInfo{}, fmt.Errorf("select agent event: %w", err)
 	}
 
-	event.Message = stringFromNull(message)
-	event.ReportPath = stringFromNull(reportPath)
-	event.ArtifactURL = stringFromNull(artifactURL)
-	event.CreatedAt = timeFromNull(createdAt)
-	event.ReceivedAt = mustParseDatabaseTime(receivedAt)
-
-	return event, nil
+	return databaseAgentEventFromGenerated(event), nil
 }
 
 func selectQuarantinedSQSMessageByID(ctx context.Context, db *sql.DB, id int64) (DatabaseQuarantinedSQSMessageInfo, error) {
-	var (
-		message           DatabaseQuarantinedSQSMessageInfo
-		externalMessageID sql.NullString
-		receiptHandle     sql.NullString
-		createdAt         string
-	)
-
-	if err := db.QueryRowContext(ctx, `
-		SELECT
-			id,
-			queue_source,
-			external_message_id,
-			receipt_handle,
-			raw_body,
-			quarantine_reason,
-			created_at
-		FROM quarantined_sqs_message
-		WHERE id = ?
-	`, id).Scan(
-		&message.ID,
-		&message.QueueSource,
-		&externalMessageID,
-		&receiptHandle,
-		&message.RawBody,
-		&message.QuarantineReason,
-		&createdAt,
-	); err != nil {
+	message, err := dbgen.New(db).GetQuarantinedSQSMessageByID(ctx, id)
+	if err != nil {
 		return DatabaseQuarantinedSQSMessageInfo{}, fmt.Errorf("select quarantined sqs message: %w", err)
 	}
 
-	message.ExternalMessageID = stringFromNull(externalMessageID)
-	message.ReceiptHandle = stringFromNull(receiptHandle)
-	message.CreatedAt = mustParseDatabaseTime(createdAt)
-
-	return message, nil
+	return databaseQuarantinedSQSMessageFromGenerated(message), nil
 }
 
 func selectSQSMessageByExternalMessageID(ctx context.Context, tx *sql.Tx, externalMessageID string) (DatabaseSQSMessageInfo, error) {
-	return scanSQSMessage(tx.QueryRowContext(ctx, selectSQSMessageSQL()+` WHERE external_message_id = ?`, externalMessageID))
+	message, err := dbgen.New(tx).GetSQSMessageByExternalMessageID(ctx, externalMessageID)
+	if err != nil {
+		return DatabaseSQSMessageInfo{}, fmt.Errorf("select sqs message: %w", err)
+	}
+
+	return databaseSQSMessageFromGenerated(message), nil
 }
 
 func selectSQSMessageByID(ctx context.Context, tx *sql.Tx, messageID int64) (DatabaseSQSMessageInfo, error) {
-	return scanSQSMessage(tx.QueryRowContext(ctx, selectSQSMessageSQL()+` WHERE id = ?`, messageID))
-}
-
-func selectSQSMessageSQL() string {
-	return `
-		SELECT
-			id,
-			external_message_id,
-			receipt_handle,
-			external_event_id,
-			raw_body,
-			message_type,
-			cloudwatch_alarm_name,
-			cloudwatch_state,
-			event_time,
-			alarm_period_seconds,
-			assigned_agent_job_id,
-			job_status,
-			created_at,
-			updated_at
-		FROM sqs_messages_tickets_cloudwatch
-	`
-}
-
-func scanSQSMessage(row *sql.Row) (DatabaseSQSMessageInfo, error) {
-	var (
-		message            DatabaseSQSMessageInfo
-		externalEventID    sql.NullString
-		cloudwatchAlarm    sql.NullString
-		cloudwatchState    sql.NullString
-		eventTime          sql.NullString
-		alarmPeriodSeconds sql.NullInt64
-		assignedAgentJobID sql.NullInt64
-		jobStatus          sql.NullString
-		createdAt          string
-		updatedAt          string
-	)
-
-	if err := row.Scan(
-		&message.ID,
-		&message.ExternalMessageID,
-		&message.ReceiptHandle,
-		&externalEventID,
-		&message.RawBody,
-		&message.MessageType,
-		&cloudwatchAlarm,
-		&cloudwatchState,
-		&eventTime,
-		&alarmPeriodSeconds,
-		&assignedAgentJobID,
-		&jobStatus,
-		&createdAt,
-		&updatedAt,
-	); err != nil {
-		return DatabaseSQSMessageInfo{}, fmt.Errorf("scan sqs message: %w", err)
+	message, err := dbgen.New(tx).GetSQSMessageByID(ctx, messageID)
+	if err != nil {
+		return DatabaseSQSMessageInfo{}, fmt.Errorf("select sqs message: %w", err)
 	}
 
-	message.Body = []byte(message.RawBody)
-	message.ExternalEventID = stringFromNull(externalEventID)
-	message.CloudWatchAlarmName = stringFromNull(cloudwatchAlarm)
-	message.CloudWatchState = stringFromNull(cloudwatchState)
-	message.EventTime = timeFromNull(eventTime)
-	message.AlarmPeriodSeconds = int64FromNull(alarmPeriodSeconds)
-	message.AssignedAgentJobID = int64FromNull(assignedAgentJobID)
-	message.JobStatus = agentJobStatusFromNull(jobStatus)
-	message.CreatedAt = mustParseDatabaseTime(createdAt)
-	message.UpdatedAt = mustParseDatabaseTime(updatedAt)
-
-	return message, nil
+	return databaseSQSMessageFromGenerated(message), nil
 }
 
 func selectAgentJobByID(ctx context.Context, tx *sql.Tx, agentJobID int64) (DatabaseAgentJobInfo, error) {
-	var (
-		agentJob         DatabaseAgentJobInfo
-		status           string
-		agentReport      sql.NullString
-		affectedRepos    sql.NullString
-		pullRequestURL   sql.NullString
-		failureReason    sql.NullString
-		ecsTaskARN       sql.NullString
-		ecsLastStatus    sql.NullString
-		ecsStoppedReason sql.NullString
-		createdAt        string
-		startedAt        sql.NullString
-		completedAt      sql.NullString
-		updatedAt        string
-	)
-
-	err := tx.QueryRowContext(ctx, `
-		SELECT
-			id,
-			agent_name,
-			status,
-			spawn_sqs_message_id,
-			agent_report,
-			affected_repositories,
-			pull_request_url,
-			failure_reason,
-			ecs_task_arn,
-			ecs_last_status,
-			ecs_stopped_reason,
-			created_at,
-			started_at,
-			completed_at,
-			updated_at
-		FROM agent_job_info
-		WHERE id = ?
-	`, agentJobID).Scan(
-		&agentJob.ID,
-		&agentJob.AgentName,
-		&status,
-		&agentJob.SpawnSQSMessageID,
-		&agentReport,
-		&affectedRepos,
-		&pullRequestURL,
-		&failureReason,
-		&ecsTaskARN,
-		&ecsLastStatus,
-		&ecsStoppedReason,
-		&createdAt,
-		&startedAt,
-		&completedAt,
-		&updatedAt,
-	)
+	agentJob, err := dbgen.New(tx).GetAgentJobByID(ctx, agentJobID)
 	if err != nil {
 		return DatabaseAgentJobInfo{}, fmt.Errorf("select agent job: %w", err)
 	}
 
-	agentJob.Status = AgentJobStatus(status)
-	agentJob.AgentReport = stringFromNull(agentReport)
-	agentJob.AffectedRepos = stringFromNull(affectedRepos)
-	agentJob.PullRequestURL = stringFromNull(pullRequestURL)
-	agentJob.FailureReason = stringFromNull(failureReason)
-	agentJob.ECSTaskARN = stringFromNull(ecsTaskARN)
-	agentJob.ECSLastStatus = stringFromNull(ecsLastStatus)
-	agentJob.ECSStoppedReason = stringFromNull(ecsStoppedReason)
-	agentJob.CreatedAt = mustParseDatabaseTime(createdAt)
-	agentJob.StartedAt = timeFromNull(startedAt)
-	agentJob.CompletedAt = timeFromNull(completedAt)
-	agentJob.UpdatedAt = mustParseDatabaseTime(updatedAt)
+	return databaseAgentJobFromGenerated(agentJob), nil
+}
 
-	return agentJob, nil
+func databaseSQSMessageFromGenerated(message dbgen.SqsMessagesTicketsCloudwatch) DatabaseSQSMessageInfo {
+	return DatabaseSQSMessageInfo{
+		ID:                  message.ID,
+		ExternalMessageID:   message.ExternalMessageID,
+		ReceiptHandle:       message.ReceiptHandle,
+		ExternalEventID:     stringFromNull(message.ExternalEventID),
+		Body:                []byte(message.RawBody),
+		RawBody:             message.RawBody,
+		MessageType:         message.MessageType,
+		CloudWatchAlarmName: stringFromNull(message.CloudwatchAlarmName),
+		CloudWatchState:     stringFromNull(message.CloudwatchState),
+		EventTime:           timeFromNull(message.EventTime),
+		AlarmPeriodSeconds:  int64FromNull(message.AlarmPeriodSeconds),
+		AssignedAgentJobID:  int64FromNull(message.AssignedAgentJobID),
+		JobStatus:           agentJobStatusFromNull(message.JobStatus),
+		CreatedAt:           mustParseDatabaseTime(message.CreatedAt),
+		UpdatedAt:           mustParseDatabaseTime(message.UpdatedAt),
+	}
+}
+
+func databaseAgentJobFromGenerated(agentJob dbgen.AgentJobInfo) DatabaseAgentJobInfo {
+	return DatabaseAgentJobInfo{
+		ID:                agentJob.ID,
+		AgentName:         agentJob.AgentName,
+		Status:            AgentJobStatus(agentJob.Status),
+		SpawnSQSMessageID: agentJob.SpawnSqsMessageID,
+		AgentReport:       stringFromNull(agentJob.AgentReport),
+		AffectedRepos:     stringFromNull(agentJob.AffectedRepositories),
+		PullRequestURL:    stringFromNull(agentJob.PullRequestUrl),
+		FailureReason:     stringFromNull(agentJob.FailureReason),
+		ECSTaskARN:        stringFromNull(agentJob.EcsTaskArn),
+		ECSLastStatus:     stringFromNull(agentJob.EcsLastStatus),
+		ECSStoppedReason:  stringFromNull(agentJob.EcsStoppedReason),
+		CreatedAt:         mustParseDatabaseTime(agentJob.CreatedAt),
+		StartedAt:         timeFromNull(agentJob.StartedAt),
+		CompletedAt:       timeFromNull(agentJob.CompletedAt),
+		UpdatedAt:         mustParseDatabaseTime(agentJob.UpdatedAt),
+	}
+}
+
+func databaseAgentEventFromGenerated(event dbgen.AgentEvent) DatabaseAgentEventInfo {
+	return DatabaseAgentEventInfo{
+		ID:          event.ID,
+		EventID:     event.EventID,
+		AgentJobID:  event.AgentJobID,
+		AgentName:   event.AgentName,
+		EventType:   event.EventType,
+		Message:     stringFromNull(event.Message),
+		ReportPath:  stringFromNull(event.ReportPath),
+		ArtifactURL: stringFromNull(event.ArtifactUrl),
+		RawBody:     event.RawBody,
+		CreatedAt:   timeFromNull(event.CreatedAt),
+		ReceivedAt:  mustParseDatabaseTime(event.ReceivedAt),
+	}
+}
+
+func databaseQuarantinedSQSMessageFromGenerated(message dbgen.QuarantinedSqsMessage) DatabaseQuarantinedSQSMessageInfo {
+	return DatabaseQuarantinedSQSMessageInfo{
+		ID:                message.ID,
+		QueueSource:       message.QueueSource,
+		ExternalMessageID: stringFromNull(message.ExternalMessageID),
+		ReceiptHandle:     stringFromNull(message.ReceiptHandle),
+		RawBody:           message.RawBody,
+		QuarantineReason:  message.QuarantineReason,
+		CreatedAt:         mustParseDatabaseTime(message.CreatedAt),
+	}
 }
 
 func nullableString(value *string) any {
