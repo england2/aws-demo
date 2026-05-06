@@ -55,27 +55,6 @@ CREATE INDEX IF NOT EXISTS idx_agent_job_info_status
 CREATE INDEX IF NOT EXISTS idx_agent_job_info_spawn_sqs_message_id
     ON agent_job_info(spawn_sqs_message_id);
 
-CREATE TABLE IF NOT EXISTS agent_event (
-    id INTEGER PRIMARY KEY,
-    event_id TEXT NOT NULL UNIQUE,
-    agent_job_id INTEGER NOT NULL,
-    agent_name TEXT NOT NULL,
-    event_type TEXT NOT NULL,
-    message TEXT,
-    report_path TEXT,
-    artifact_url TEXT,
-    raw_body TEXT NOT NULL,
-    created_at TEXT,
-    received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (agent_job_id) REFERENCES agent_job_info(id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_agent_event_agent_job_id
-    ON agent_event(agent_job_id);
-
-CREATE INDEX IF NOT EXISTS idx_agent_event_event_type
-    ON agent_event(event_type);
-
 CREATE TABLE IF NOT EXISTS quarantined_sqs_message (
     id INTEGER PRIMARY KEY,
     queue_source TEXT NOT NULL,

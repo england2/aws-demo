@@ -1,7 +1,5 @@
 package agentproto
 
-import "time"
-
 type AgentEventType string
 
 const (
@@ -17,13 +15,12 @@ const (
 	JobFailed            AgentEventType = "JobFailed"
 )
 
+// ai--done
+// we're restructing agentevents to where they are control objects only!
+// we will not record them and will not wrap them in a struct.
+// please adjust the codebase accordingly
 type AgentEvent struct {
-	EventID     string         `json:"event_id"`
-	JobID       string         `json:"job_id"`
-	AgentName   string         `json:"agent_name"`
-	Type        AgentEventType `json:"type"`
-	Message     string         `json:"message,omitempty"`
-	ReportPath  string         `json:"report_path,omitempty"`
-	ArtifactURL string         `json:"artifact_url,omitempty"`
-	CreatedAt   time.Time      `json:"created_at"`
+	JobID     string         `json:"job_id"`
+	AgentName string         `json:"agent_name"`
+	Type      AgentEventType `json:"type"`
 }

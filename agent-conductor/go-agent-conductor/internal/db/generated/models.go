@@ -8,20 +8,6 @@ import (
 	"database/sql"
 )
 
-type AgentEvent struct {
-	ID          int64          `json:"id"`
-	EventID     string         `json:"event_id"`
-	AgentJobID  int64          `json:"agent_job_id"`
-	AgentName   string         `json:"agent_name"`
-	EventType   string         `json:"event_type"`
-	Message     sql.NullString `json:"message"`
-	ReportPath  sql.NullString `json:"report_path"`
-	ArtifactUrl sql.NullString `json:"artifact_url"`
-	RawBody     string         `json:"raw_body"`
-	CreatedAt   sql.NullString `json:"created_at"`
-	ReceivedAt  string         `json:"received_at"`
-}
-
 type AgentJobInfo struct {
 	ID                   int64          `json:"id"`
 	AgentName            string         `json:"agent_name"`

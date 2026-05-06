@@ -59,22 +59,6 @@ type DatabaseAgentJobInfo struct {
 	UpdatedAt         time.Time
 }
 
-// DatabaseAgentEventInfo mirrors wrapper-emitted events once durable event storage returns.
-// It currently documents the intended row shape and conversion boundary for agent_event.
-type DatabaseAgentEventInfo struct {
-	ID          int64
-	EventID     string
-	AgentJobID  int64
-	AgentName   string
-	EventType   string
-	Message     *string
-	ReportPath  *string
-	ArtifactURL *string
-	RawBody     string
-	CreatedAt   *time.Time
-	ReceivedAt  time.Time
-}
-
 // DatabaseQuarantinedSQSMessageInfo describes malformed or unusable SQS input.
 // The conductor writes these rows before deleting poison messages from their queues.
 type DatabaseQuarantinedSQSMessageInfo struct {

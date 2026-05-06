@@ -117,7 +117,6 @@ func spawnAndTrackAgentJob(ctx context.Context, databaseCommands chan<- Database
 		adhocAWSFargateSpawnConfig,
 		adhocAgentFargateEventsQueueURL,
 		databaseCommands,
-		router.DeleteMessage,
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create running Fargate agent manager: %v\n", err)

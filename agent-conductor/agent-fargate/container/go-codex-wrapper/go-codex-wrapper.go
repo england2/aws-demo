@@ -61,12 +61,12 @@ func main() {
 	}
 
 	// setup
-	if err := eventEmitter.Send(ctx, agentproto.AgentWrapperStarted, "agent wrapper started"); err != nil {
+	if err := eventEmitter.Send(ctx, agentproto.AgentWrapperStarted); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
 
-	if err := eventEmitter.Send(ctx, agentproto.AgentSetupStarted, "agent setup started"); err != nil {
+	if err := eventEmitter.Send(ctx, agentproto.AgentSetupStarted); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
@@ -100,7 +100,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := eventEmitter.Send(ctx, agentproto.CodexStarted, "codex started"); err != nil {
+	if err := eventEmitter.Send(ctx, agentproto.CodexStarted); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
@@ -118,7 +118,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := eventEmitter.Send(ctx, agentproto.CodexExited, "codex exited"); err != nil {
+	if err := eventEmitter.Send(ctx, agentproto.CodexExited); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
@@ -133,9 +133,9 @@ func emitEndingToolEvents(ctx context.Context) error {
 		return err
 	}
 
-	if err := eventEmitter.Send(ctx, agentproto.AgentReportedSuccess, "agent reported success via ending tool"); err != nil {
+	if err := eventEmitter.Send(ctx, agentproto.AgentReportedSuccess); err != nil {
 		return err
 	}
 
-	return eventEmitter.Send(ctx, agentproto.JobCompleted, "agent job completed via ending tool")
+	return eventEmitter.Send(ctx, agentproto.JobCompleted)
 }

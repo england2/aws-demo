@@ -6,13 +6,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"agentproto"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
-	"github.com/google/uuid"
 )
 
 // AgentEventEmitter sends wrapper lifecycle events to the conductor-owned SQS queue.
@@ -63,18 +61,14 @@ func NewAgentEventEmitter(ctx context.Context) (*AgentEventEmitter, error) {
 	}, nil
 }
 
-// Send emits one agentproto.AgentEvent to the shared Fargate-events SQS queue.
-// The conductor correlates this message by JobID and uses EventID for durable
-// de-duplication once event persistence is implemented. Each send creates a new
-// logical event with a fresh UUID and current UTC timestamp.
-func (emitter *AgentEventEmitter) Send(ctx context.Context, eventType agentproto.AgentEventType, message string) error {
+// Send emits one control-only agentproto.AgentEvent to the shared Fargate-events SQS queue.
+// The event intentionally contains only routing/control fields; transport metadata stays
+// in SQS and durable job state stays in the conductor database.
+func (emitter *AgentEventEmitter) Send(ctx context.Context, eventType agentproto.AgentEventType) error {
 	event := agentproto.AgentEvent{
-		EventID:   uuid.NewString(),
 		JobID:     emitter.jobID,
 		AgentName: emitter.agentName,
 		Type:      eventType,
-		Message:   message,
-		CreatedAt: time.Now().UTC(),
 	}
 
 	body, err := json.Marshal(event)
@@ -93,7 +87,7 @@ func (emitter *AgentEventEmitter) Send(ctx context.Context, eventType agentproto
 	return nil
 }
 
-// SendFailure is the best-effort error reporting path for setup/runtime failures.
+// SendFailure is the best-effort failure control path for setup/runtime failures.
 // It intentionally never returns an error because callers are already handling a
 // primary failure path and should not mask that failure with telemetry problems.
 func (emitter *AgentEventEmitter) SendFailure(ctx context.Context, eventType agentproto.AgentEventType, err error) {
@@ -101,7 +95,7 @@ func (emitter *AgentEventEmitter) SendFailure(ctx context.Context, eventType age
 		return
 	}
 
-	if sendErr := emitter.Send(ctx, eventType, err.Error()); sendErr != nil {
+	if sendErr := emitter.Send(ctx, eventType); sendErr != nil {
 		fmt.Fprintf(os.Stderr, "send failure agent event: %v\n", sendErr)
 	}
 }

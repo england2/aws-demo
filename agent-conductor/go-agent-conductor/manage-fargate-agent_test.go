@@ -15,11 +15,9 @@ func TestParseAgentEventSQSMessageRejectsNonNumericJobID(t *testing.T) {
 		MessageId:     aws.String("test-message"),
 		ReceiptHandle: aws.String("test-receipt"),
 		Body: aws.String(`{
-			"event_id": "event-1",
 			"job_id": "manual-test",
 			"agent_name": "agent-fargate-codex",
-			"type": "CodexStarted",
-			"created_at": "2026-05-05T00:00:00Z"
+			"type": "CodexStarted"
 		}`),
 	}
 

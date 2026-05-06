@@ -53,24 +53,6 @@ func databaseAgentJobFromGenerated(agentJob dbgen.AgentJobInfo) DatabaseAgentJob
 	}
 }
 
-// databaseAgentEventFromGenerated converts future durable agent_event rows to domain state.
-// The helper remains as the expected boundary for reintroducing event persistence.
-func databaseAgentEventFromGenerated(event dbgen.AgentEvent) DatabaseAgentEventInfo {
-	return DatabaseAgentEventInfo{
-		ID:          event.ID,
-		EventID:     event.EventID,
-		AgentJobID:  event.AgentJobID,
-		AgentName:   event.AgentName,
-		EventType:   event.EventType,
-		Message:     stringFromNull(event.Message),
-		ReportPath:  stringFromNull(event.ReportPath),
-		ArtifactURL: stringFromNull(event.ArtifactUrl),
-		RawBody:     event.RawBody,
-		CreatedAt:   timeFromNull(event.CreatedAt),
-		ReceivedAt:  mustParseDatabaseTime(event.ReceivedAt),
-	}
-}
-
 // databaseQuarantinedSQSMessageFromGenerated converts a quarantine sqlc row to domain state.
 // The router returns this after storing malformed SQS messages for later debugging.
 func databaseQuarantinedSQSMessageFromGenerated(message dbgen.QuarantinedSqsMessage) DatabaseQuarantinedSQSMessageInfo {

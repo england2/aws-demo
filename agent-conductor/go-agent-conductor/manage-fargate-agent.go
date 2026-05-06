@@ -17,16 +17,6 @@ import (
 
 const queueSourceAgentFargateEvent = "agent_fargate_event"
 
-// AgentEventEnvelope keeps SQS transport metadata separate from agentproto.AgentEvent.
-// The conductor uses the event for routing and the receipt handle/raw body for deletion
-// or quarantine/debug behavior.
-type AgentEventEnvelope struct {
-	Event             agentproto.AgentEvent
-	ReceiptHandle     string
-	RawBody           string
-	ExternalMessageID string
-}
-
 // RunningFargateAgent is the in-memory controller for one spawned ECS task.
 // It links the durable agent job ID, ECS task ARN, event channel, DB command channel,
 // and ECS client used to monitor that specific remote worker.
@@ -37,11 +27,10 @@ type RunningFargateAgent struct {
 	AWSFargateSpawnConfig AWSFargateSpawnConfig
 	EventsQueueURL        string
 	DatabaseCommands      chan<- DatabaseCommand
-	AgentEvents           chan AgentEventEnvelope
+	AgentEvents           chan agentproto.AgentEvent
 	Done                  chan struct{}
 
-	ecsClient               *ecs.Client
-	deleteAgentEventMessage func(context.Context, string) error
+	ecsClient *ecs.Client
 }
 
 // AgentEventRouter owns the shared SQS consumer for all Fargate wrapper events.
@@ -50,7 +39,7 @@ type RunningFargateAgent struct {
 type AgentEventRouter struct {
 	poller           *SQSPoller
 	DatabaseCommands chan<- DatabaseCommand
-	Agents           map[string]chan<- AgentEventEnvelope
+	Agents           map[string]chan<- agentproto.AgentEvent
 	Register         chan RunningFargateAgentRegistration
 	Unregister       chan string
 }
@@ -59,7 +48,7 @@ type AgentEventRouter struct {
 // main registers this immediately after a Fargate task is accepted by ECS.
 type RunningFargateAgentRegistration struct {
 	AgentJobID string
-	Events     chan<- AgentEventEnvelope
+	Events     chan<- agentproto.AgentEvent
 }
 
 // StartAgentEventRouter constructs the shared router for the Fargate-events SQS queue.
@@ -79,7 +68,7 @@ func StartAgentEventRouter(ctx context.Context, databaseCommands chan<- Database
 	return &AgentEventRouter{
 		poller:           poller,
 		DatabaseCommands: databaseCommands,
-		Agents:           make(map[string]chan<- AgentEventEnvelope),
+		Agents:           make(map[string]chan<- agentproto.AgentEvent),
 		Register:         make(chan RunningFargateAgentRegistration),
 		Unregister:       make(chan string),
 	}, nil
@@ -88,7 +77,7 @@ func StartAgentEventRouter(ctx context.Context, databaseCommands chan<- Database
 // Run is the router's select loop for registration, unregistration, events, and errors.
 // It is intentionally single-threaded around the Agents map so no mutex is needed.
 func (router *AgentEventRouter) Run(ctx context.Context) {
-	messages := make(chan AgentEventEnvelope)
+	messages := make(chan agentproto.AgentEvent)
 	errors := make(chan error)
 	go router.poll(ctx, messages, errors)
 
@@ -102,37 +91,33 @@ func (router *AgentEventRouter) Run(ctx context.Context) {
 		case agentJobID := <-router.Unregister:
 			delete(router.Agents, agentJobID)
 			fmt.Printf("unregistered running Fargate agentJob=%s\n", agentJobID)
-		case envelope := <-messages:
-			router.routeEnvelope(ctx, envelope)
+		case event := <-messages:
+			router.routeEvent(ctx, event)
 		case err := <-errors:
 			fmt.Fprintf(os.Stderr, "agent event router: %v\n", err)
 		}
 	}
 }
 
-// routeEnvelope sends a parsed agent event to the running job controller for its JobID.
-// If no controller is registered, the event is logged and deleted because v1 cannot
-// recover runtime-only events for unknown or already-finished jobs.
-func (router *AgentEventRouter) routeEnvelope(ctx context.Context, envelope AgentEventEnvelope) {
-	events, ok := router.Agents[envelope.Event.JobID]
+// routeEvent sends a parsed agent event to the running job controller for its JobID.
+// If no controller is registered, the event is logged; the poller deletes the SQS
+// delivery after handing the parsed control event to this router.
+func (router *AgentEventRouter) routeEvent(ctx context.Context, event agentproto.AgentEvent) {
+	events, ok := router.Agents[event.JobID]
 	if ok {
 		select {
-		case events <- envelope:
+		case events <- event:
 		case <-ctx.Done():
 		}
 		return
 	}
 
-	fmt.Fprintf(os.Stderr, "discard unrouted agent event: jobID=%s type=%s eventID=%s\n", envelope.Event.JobID, envelope.Event.Type, envelope.Event.EventID)
-
-	if err := router.DeleteMessage(ctx, envelope.ReceiptHandle); err != nil {
-		fmt.Fprintf(os.Stderr, "delete unrouted agent event: %v\n", err)
-	}
+	fmt.Fprintf(os.Stderr, "discard unrouted agent event: jobID=%s type=%s\n", event.JobID, event.Type)
 }
 
 // poll long-polls the agent-event SQS queue and parses wrapper event messages.
 // Malformed messages are quarantined to avoid poison-message retry loops.
-func (router *AgentEventRouter) poll(ctx context.Context, messages chan<- AgentEventEnvelope, errors chan<- error) {
+func (router *AgentEventRouter) poll(ctx context.Context, messages chan<- agentproto.AgentEvent, errors chan<- error) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -148,7 +133,7 @@ func (router *AgentEventRouter) poll(ctx context.Context, messages chan<- AgentE
 		}
 
 		for _, message := range rawMessages {
-			envelope, err := ParseAgentEventSQSMessage(message)
+			event, err := ParseAgentEventSQSMessage(message)
 			if err != nil {
 				sendAgentEventRouterError(ctx, errors, err)
 				router.discardMessage(ctx, message, err.Error())
@@ -156,7 +141,10 @@ func (router *AgentEventRouter) poll(ctx context.Context, messages chan<- AgentE
 			}
 
 			select {
-			case messages <- envelope:
+			case messages <- event:
+				if err := router.DeleteMessage(ctx, aws.ToString(message.ReceiptHandle)); err != nil {
+					sendAgentEventRouterError(ctx, errors, err)
+				}
 			case <-ctx.Done():
 				return
 			}
@@ -186,7 +174,6 @@ func (router *AgentEventRouter) discardMessage(ctx context.Context, message sqst
 }
 
 // DeleteMessage removes a handled agent-event SQS delivery from the shared events queue.
-// RunningFargateAgent receives this callback so it does not need to know router internals.
 func (router *AgentEventRouter) DeleteMessage(ctx context.Context, receiptHandle string) error {
 	if receiptHandle == "" {
 		return fmt.Errorf("agent event receipt handle is required")
@@ -199,48 +186,41 @@ func (router *AgentEventRouter) DeleteMessage(ctx context.Context, receiptHandle
 	return nil
 }
 
-// ParseAgentEventSQSMessage decodes one SQS delivery into an agent event envelope.
+// ParseAgentEventSQSMessage decodes one SQS delivery into a control-only agent event.
 // It validates that JobID is numeric because the conductor maps it to SQLite job IDs.
-func ParseAgentEventSQSMessage(message sqstypes.Message) (AgentEventEnvelope, error) {
+func ParseAgentEventSQSMessage(message sqstypes.Message) (agentproto.AgentEvent, error) {
 	if message.Body == nil {
-		return AgentEventEnvelope{}, fmt.Errorf("agent event SQS message %s has empty body", aws.ToString(message.MessageId))
+		return agentproto.AgentEvent{}, fmt.Errorf("agent event SQS message %s has empty body", aws.ToString(message.MessageId))
 	}
 
 	var event agentproto.AgentEvent
 	if err := json.Unmarshal([]byte(*message.Body), &event); err != nil {
-		return AgentEventEnvelope{}, fmt.Errorf("parse agent event SQS message %s: %w", aws.ToString(message.MessageId), err)
+		return agentproto.AgentEvent{}, fmt.Errorf("parse agent event SQS message %s: %w", aws.ToString(message.MessageId), err)
 	}
 	if _, err := parseAgentJobIDForDB(event.JobID); err != nil {
-		return AgentEventEnvelope{}, fmt.Errorf("parse agent event SQS message %s: %w", aws.ToString(message.MessageId), err)
+		return agentproto.AgentEvent{}, fmt.Errorf("parse agent event SQS message %s: %w", aws.ToString(message.MessageId), err)
 	}
 
-	return AgentEventEnvelope{
-		Event:             event,
-		ReceiptHandle:     aws.ToString(message.ReceiptHandle),
-		RawBody:           *message.Body,
-		ExternalMessageID: aws.ToString(message.MessageId),
-	}, nil
+	return event, nil
 }
 
 // NewRunningFargateAgent builds the per-task monitor/controller after ECS accepts a task.
-// It creates the ECS client used for DescribeTasks and stores the router delete callback
-// used to acknowledge agent-event SQS deliveries.
-func NewRunningFargateAgent(ctx context.Context, agentJobID string, taskARN string, spawnConfig AWSFargateSpawnConfig, eventsQueueURL string, databaseCommands chan<- DatabaseCommand, deleteAgentEventMessage func(context.Context, string) error) (*RunningFargateAgent, error) {
+// It creates the ECS client used for DescribeTasks.
+func NewRunningFargateAgent(ctx context.Context, agentJobID string, taskARN string, spawnConfig AWSFargateSpawnConfig, eventsQueueURL string, databaseCommands chan<- DatabaseCommand) (*RunningFargateAgent, error) {
 	awsConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion(spawnConfig.Region))
 	if err != nil {
 		return nil, fmt.Errorf("load AWS config for running Fargate agent: %w", err)
 	}
 
 	return &RunningFargateAgent{
-		AgentJobID:              agentJobID,
-		TaskARN:                 taskARN,
-		AWSFargateSpawnConfig:   spawnConfig,
-		EventsQueueURL:          eventsQueueURL,
-		DatabaseCommands:        databaseCommands,
-		AgentEvents:             make(chan AgentEventEnvelope, 32),
-		Done:                    make(chan struct{}),
-		ecsClient:               ecs.NewFromConfig(awsConfig),
-		deleteAgentEventMessage: deleteAgentEventMessage,
+		AgentJobID:            agentJobID,
+		TaskARN:               taskARN,
+		AWSFargateSpawnConfig: spawnConfig,
+		EventsQueueURL:        eventsQueueURL,
+		DatabaseCommands:      databaseCommands,
+		AgentEvents:           make(chan agentproto.AgentEvent, 32),
+		Done:                  make(chan struct{}),
+		ecsClient:             ecs.NewFromConfig(awsConfig),
 	}, nil
 }
 
@@ -254,8 +234,8 @@ func (agent *RunningFargateAgent) Run(ctx context.Context) {
 
 	for {
 		select {
-		case envelope := <-agent.AgentEvents:
-			if agent.ManageAgent(ctx, envelope) {
+		case event := <-agent.AgentEvents:
+			if agent.ManageAgent(ctx, event) {
 				return
 			}
 		case <-ticker.C:
@@ -277,12 +257,10 @@ func (agent *RunningFargateAgent) Run(ctx context.Context) {
 // behavior: helper goroutines may gather facts or feed channels, but they should
 // not independently decide how to respond to the agent.
 //
-// Agent events are recorded in the database first so the conductor keeps a
-// durable history and the database layer can update durable job state. After
-// that write succeeds, this controller may react to the event in memory. Those
-// reactions are intentionally non-durable. If the conductor process dies, any
-// in-flight runtime reaction can be lost; rebuilding a durable workflow engine
-// for already-running Fargate processes is not a goal here.
+// Agent events are control objects only. They are not durable records and are
+// not wrapped with SQS transport metadata after parsing. If the conductor process
+// dies, any in-flight runtime reaction can be lost; rebuilding a durable workflow
+// engine for already-running Fargate processes is not a goal here.
 //
 // As this grows, keep agent-event handling and ECS/task-lifecycle handling close
 // together in this same control loop. The intended shape is one select loop that
@@ -300,9 +278,9 @@ func (agent *RunningFargateAgent) Run(ctx context.Context) {
 //
 //	for {
 //		select {
-//		case envelope := <-agent.AgentEvents:
-//			result := agent.manageAgentEvent(ctx, envelope)
-//			switch envelope.Event.Type {
+//		case event := <-agent.AgentEvents:
+//			result := agent.manageAgentEvent(ctx, event)
+//			switch event.Type {
 //			case agentproto.AgentWrapperStarted:
 //			case agentproto.AgentSetupStarted:
 //			case agentproto.AgentSetupFailed:
@@ -331,14 +309,10 @@ func (agent *RunningFargateAgent) Run(ctx context.Context) {
 //			return
 //		}
 //	}
-func (agent *RunningFargateAgent) ManageAgent(ctx context.Context, envelope AgentEventEnvelope) bool {
-	fmt.Printf("agent event: jobID=%s type=%s eventID=%s\n", envelope.Event.JobID, envelope.Event.Type, envelope.Event.EventID)
+func (agent *RunningFargateAgent) ManageAgent(ctx context.Context, event agentproto.AgentEvent) bool {
+	fmt.Printf("agent event: jobID=%s type=%s\n", event.JobID, event.Type)
 
-	if err := agent.deleteAgentEventMessage(ctx, envelope.ReceiptHandle); err != nil {
-		fmt.Fprintf(os.Stderr, "delete agent event message: %v\n", err)
-	}
-
-	switch envelope.Event.Type {
+	switch event.Type {
 	case agentproto.AgentWrapperStarted:
 	case agentproto.AgentSetupStarted:
 	case agentproto.AgentSetupFailed:
