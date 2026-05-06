@@ -1,11 +1,11 @@
-package main
+package database
 
 import (
 	"context"
 	"database/sql"
 	"fmt"
 
-	dbgen "agent-orchestrator/internal/db/generated"
+	dbgen "agent-orchestrator/internal/database/generated"
 )
 
 // processInboundSQSMessage is the DB-owned intake/decision transaction for SQS input.

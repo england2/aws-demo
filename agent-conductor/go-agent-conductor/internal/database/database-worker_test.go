@@ -1,4 +1,4 @@
-package main
+package database
 
 import (
 	"context"
@@ -50,7 +50,7 @@ func TestQuarantineSQSMessageRecordsPoisonMessage(t *testing.T) {
 	db := newTestDatabase(t)
 	ctx := context.Background()
 
-	result := quarantineSQSMessage(ctx, db, queueSourceAgentFargateEvent, "sqs-event-1", "receipt-1", `{"job_id":"manual-test"}`, `parse agent job id "manual-test"`)
+	result := quarantineSQSMessage(ctx, db, "agent_fargate_event", "sqs-event-1", "receipt-1", `{"job_id":"manual-test"}`, `parse agent job id "manual-test"`)
 	if result.Err != nil {
 		t.Fatalf("quarantineSQSMessage error: %v", result.Err)
 	}
@@ -60,7 +60,7 @@ func TestQuarantineSQSMessageRecordsPoisonMessage(t *testing.T) {
 	if result.QuarantinedMessage == nil {
 		t.Fatalf("QuarantinedMessage is nil")
 	}
-	if result.QuarantinedMessage.QueueSource != queueSourceAgentFargateEvent {
+	if result.QuarantinedMessage.QueueSource != "agent_fargate_event" {
 		t.Fatalf("QueueSource = %q", result.QuarantinedMessage.QueueSource)
 	}
 	if result.QuarantinedMessage.QuarantineReason != `parse agent job id "manual-test"` {

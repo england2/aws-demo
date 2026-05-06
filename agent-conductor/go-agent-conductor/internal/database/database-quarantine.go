@@ -1,11 +1,11 @@
-package main
+package database
 
 import (
 	"context"
 	"database/sql"
 	"fmt"
 
-	dbgen "agent-orchestrator/internal/db/generated"
+	dbgen "agent-orchestrator/internal/database/generated"
 )
 
 // quarantineSQSMessage persists malformed or unusable SQS input before deletion.

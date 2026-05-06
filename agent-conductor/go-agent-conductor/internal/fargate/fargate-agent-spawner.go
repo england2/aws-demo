@@ -1,4 +1,4 @@
-package main
+package fargate
 
 import (
 	"context"
@@ -184,6 +184,16 @@ func (runtimeEnv AgentFargateRuntimeEnv) ECSEnvironment() []ecstypes.KeyValuePai
 // The values are passed through to the Fargate wrapper only when explicitly enabled.
 func DebugSSHRuntimeEnv() (bool, string) {
 	return truthyEnv("DEBUG_SSH_ENABLED"), getenvDefault("DEBUG_SSH_PUBLIC_KEY_SECRET_NAME", "debug_public_ssh_key")
+}
+
+// getenvDefault reads an environment variable with a fallback for Fargate runtime config.
+func getenvDefault(name string, fallback string) string {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback
+	}
+
+	return value
 }
 
 // truthyEnv normalizes shell-friendly boolean env values.

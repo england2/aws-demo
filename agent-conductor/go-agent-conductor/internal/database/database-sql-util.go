@@ -1,14 +1,15 @@
-package main
+package database
 
 import (
 	"database/sql"
 	"time"
 
-	dbgen "agent-orchestrator/internal/db/generated"
+	dbgen "agent-orchestrator/internal/database/generated"
 )
 
 // Adapters from sqlc row models to conductor domain models while the database layer is being migrated.
 
+// ai--
 // databaseSQSMessageFromGenerated converts a sqlc SQS row into the conductor domain type.
 // It centralizes nullable/time parsing so intake code can operate on plain pointers.
 func databaseSQSMessageFromGenerated(message dbgen.SqsMessagesTicketsCloudwatch) DatabaseSQSMessageInfo {

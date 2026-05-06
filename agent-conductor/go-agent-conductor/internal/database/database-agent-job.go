@@ -1,11 +1,11 @@
-package main
+package database
 
 import (
 	"context"
 	"database/sql"
 	"fmt"
 
-	dbgen "agent-orchestrator/internal/db/generated"
+	dbgen "agent-orchestrator/internal/database/generated"
 )
 
 const defaultAgentJobName = "agent-fargate-codex"

@@ -1,8 +1,10 @@
 package main
 
+import "agent-orchestrator/internal/fargate"
+
 // Oh no, a hard-coded config file!
 
-var adhocAWSFargateSpawnConfig = AWSFargateSpawnConfig{
+var adhocAWSFargateSpawnConfig = fargate.AWSFargateSpawnConfig{
 	Region:         "us-west-2",
 	Cluster:        "ecs-cluster-agent-fargate",
 	TaskDefinition: "agent-fargate",

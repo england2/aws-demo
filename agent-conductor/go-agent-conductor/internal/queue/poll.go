@@ -1,4 +1,4 @@
-package main
+package queue
 
 import (
 	"context"
@@ -6,6 +6,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"agent-orchestrator/internal/domain"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -35,8 +37,8 @@ type SQSPollerConfig struct {
 
 // StartSQSPoller starts the primary ticket/CloudWatch input queue consumer.
 // It returns channels so main can process one parsed SQS delivery at a time.
-func StartSQSPoller(ctx context.Context) (<-chan DatabaseSQSMessageInfo, <-chan error) {
-	messages := make(chan DatabaseSQSMessageInfo)
+func StartSQSPoller(ctx context.Context) (<-chan domain.DatabaseSQSMessageInfo, <-chan error) {
+	messages := make(chan domain.DatabaseSQSMessageInfo)
 	errors := make(chan error)
 
 	go func() {
@@ -79,7 +81,7 @@ func NewTicketCloudWatchSQSPoller(ctx context.Context) (*SQSPoller, error) {
 // Poll continuously long-polls SQS and emits parsed database message structs.
 // It intentionally receives one SQS message at a time to keep the conductor's
 // database-first intake and agent spawning flow simple and serialized.
-func (p *SQSPoller) Poll(ctx context.Context, messages chan<- DatabaseSQSMessageInfo, errors chan<- error) {
+func (p *SQSPoller) Poll(ctx context.Context, messages chan<- domain.DatabaseSQSMessageInfo, errors chan<- error) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -90,7 +92,7 @@ func (p *SQSPoller) Poll(ctx context.Context, messages chan<- DatabaseSQSMessage
 		rawMessages, err := p.ReceiveMessages(ctx)
 		if err != nil {
 			sendPollError(ctx, errors, err)
-			sleepUnlessCanceled(ctx, 5*time.Second)
+			SleepUnlessCanceled(ctx, 5*time.Second)
 			continue
 		}
 
@@ -178,12 +180,12 @@ func (p *SQSPoller) DeleteMessage(ctx context.Context, receiptHandle string) err
 
 // parseSQSMessage converts AWS transport data into the conductor's raw message model.
 // Business parsing happens later in the database intake path so raw bodies are preserved.
-func parseSQSMessage(message types.Message) (DatabaseSQSMessageInfo, error) {
+func parseSQSMessage(message types.Message) (domain.DatabaseSQSMessageInfo, error) {
 	if message.Body == nil {
-		return DatabaseSQSMessageInfo{}, fmt.Errorf("sqs message %s has empty body", aws.ToString(message.MessageId))
+		return domain.DatabaseSQSMessageInfo{}, fmt.Errorf("sqs message %s has empty body", aws.ToString(message.MessageId))
 	}
 
-	return DatabaseSQSMessageInfo{
+	return domain.DatabaseSQSMessageInfo{
 		ExternalMessageID: aws.ToString(message.MessageId),
 		ReceiptHandle:     aws.ToString(message.ReceiptHandle),
 		Body:              []byte(*message.Body),
@@ -227,9 +229,9 @@ func sendPollError(ctx context.Context, errors chan<- error, err error) {
 	}
 }
 
-// sleepUnlessCanceled backs off a polling loop while still responding to shutdown.
+// SleepUnlessCanceled backs off a polling loop while still responding to shutdown.
 // It avoids busy retrying on AWS/SQS errors.
-func sleepUnlessCanceled(ctx context.Context, duration time.Duration) {
+func SleepUnlessCanceled(ctx context.Context, duration time.Duration) {
 	timer := time.NewTimer(duration)
 	defer timer.Stop()
 
