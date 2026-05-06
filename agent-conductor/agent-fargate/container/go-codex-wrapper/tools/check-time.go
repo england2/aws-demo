@@ -12,7 +12,10 @@ import (
 //go:embed check-time.go.md
 var CheckTimeGuide string
 
-// should replace this with codex SDK and a simple countdown timer in the future.
+// CheckTime prints elapsed wrapper runtime for the headless Codex agent.
+// It depends on /tmp/agent-meta/start-time.txt written by the wrapper entrypoint.
+// If the runtime exceeds the configured budget, it prints the ending report guide
+// so Codex can stop and produce final output instead of running until Fargate kills it.
 func CheckTime() {
 	startTimeBytes, err := os.ReadFile("/tmp/agent-meta/start-time.txt")
 	if err != nil {

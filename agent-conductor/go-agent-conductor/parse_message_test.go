@@ -2,6 +2,8 @@ package main
 
 import "testing"
 
+// TestParseSQSMessageBodyCloudWatchAlarm verifies EventBridge alarm fields are normalized.
+// The database intake logic depends on these parsed fields for chain and spawn decisions.
 func TestParseSQSMessageBodyCloudWatchAlarm(t *testing.T) {
 	body := []byte(`{
 		"id": "event-1",
@@ -41,6 +43,8 @@ func TestParseSQSMessageBodyCloudWatchAlarm(t *testing.T) {
 	}
 }
 
+// TestParseSQSMessageBodyUnknownForInvalidJSON ensures malformed JSON is not fatal here.
+// The parser classifies it as unknown and leaves quarantine/ignore policy to callers.
 func TestParseSQSMessageBodyUnknownForInvalidJSON(t *testing.T) {
 	parsed := ParseSQSMessageBody([]byte(`not-json`))
 

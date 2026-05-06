@@ -7,6 +7,9 @@ import (
 	"strconv"
 )
 
+// main is the conductor entrypoint running on the debian-agent-operation EC2 host.
+// It initializes SQLite, starts the DB worker, starts the agent-event router, and
+// processes inbound CloudWatch/ticket SQS messages into Fargate agent jobs.
 func main() {
 
 	fmt.Println("Agent Conductor started!")
@@ -72,6 +75,9 @@ func main() {
 	}
 }
 
+// spawnAndTrackAgentJob starts one Fargate Codex worker for a durable agent job.
+// It persists spawn success/failure through the DB worker, registers the running-agent
+// event channel with the router, and starts the ECS/event monitor goroutine.
 func spawnAndTrackAgentJob(ctx context.Context, databaseCommands chan<- DatabaseCommand, router *AgentEventRouter, agentJob DatabaseAgentJobInfo, message DatabaseSQSMessageInfo) bool {
 	agentJobID := strconv.FormatInt(agentJob.ID, 10)
 	debugSSHEnabled, debugSSHPublicKeySecret := DebugSSHRuntimeEnv()
@@ -137,6 +143,8 @@ func spawnAndTrackAgentJob(ctx context.Context, databaseCommands chan<- Database
 	return true
 }
 
+// buildAgentPrompt creates the initial Codex instruction string for a Fargate worker.
+// It connects durable DB context to the wrapper's AGENT_PROMPT environment variable.
 func buildAgentPrompt(agentJob DatabaseAgentJobInfo, message DatabaseSQSMessageInfo) string {
 	return fmt.Sprintf(
 		"read agents.md and carry out the task. agent_job_id=%d message_id=%d message_type=%s raw_alert=%s",

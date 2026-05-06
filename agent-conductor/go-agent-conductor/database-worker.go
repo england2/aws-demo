@@ -6,6 +6,8 @@ import (
 	"fmt"
 )
 
+// DatabaseCommandKind names one serialized database operation handled by the worker.
+// Commands keep all SQLite writes on one goroutine so state transitions stay ordered.
 type DatabaseCommandKind string
 
 const (
@@ -17,6 +19,9 @@ const (
 	DatabaseCommandMarkAgentJobTaskStopped  DatabaseCommandKind = "mark_agent_job_task_stopped"
 )
 
+// DatabaseCommand is the request envelope sent to the single database worker.
+// Different command kinds use different fields; Reply is always populated by
+// sendDatabaseCommand so callers can block until durable handling completes.
 type DatabaseCommand struct {
 	Kind              DatabaseCommandKind
 	SQSMessage        DatabaseSQSMessageInfo
@@ -33,6 +38,9 @@ type DatabaseCommand struct {
 	Reply             chan DatabaseCommandResult
 }
 
+// DatabaseCommandResult is the database worker response consumed by conductor loops.
+// It contains refreshed DB rows plus control flags telling callers whether to spawn work,
+// delete SQS messages, or stop monitoring a terminal job.
 type DatabaseCommandResult struct {
 	Message             DatabaseSQSMessageInfo
 	AgentJob            *DatabaseAgentJobInfo
@@ -44,6 +52,9 @@ type DatabaseCommandResult struct {
 	Err                 error
 }
 
+// StartDatabaseWorker opens the runtime DB and starts the serialized command loop.
+// All conductor components send writes through this channel instead of touching SQLite
+// directly, which avoids concurrent write races in the local SQLite database.
 func StartDatabaseWorker(ctx context.Context) (chan<- DatabaseCommand, error) {
 	db, err := openConductorDB(ctx)
 	if err != nil {
@@ -70,6 +81,8 @@ func StartDatabaseWorker(ctx context.Context) (chan<- DatabaseCommand, error) {
 	return commands, nil
 }
 
+// ProcessInboundSQSMessageWithDatabase sends one ticket/CloudWatch message to the DB worker.
+// The worker records it and returns the durable decision about whether to spawn an agent job.
 func ProcessInboundSQSMessageWithDatabase(ctx context.Context, commands chan<- DatabaseCommand, message DatabaseSQSMessageInfo) DatabaseCommandResult {
 	command := DatabaseCommand{
 		Kind:       DatabaseCommandProcessInboundSQSMessage,
@@ -79,6 +92,8 @@ func ProcessInboundSQSMessageWithDatabase(ctx context.Context, commands chan<- D
 	return sendDatabaseCommand(ctx, commands, command)
 }
 
+// MarkAgentJobSpawned records the ECS task ARN after Fargate RunTask succeeds.
+// The conductor calls this before it starts monitoring agent events for that task.
 func MarkAgentJobSpawned(ctx context.Context, commands chan<- DatabaseCommand, agentJobID int64, taskARN string) DatabaseCommandResult {
 	return sendDatabaseCommand(ctx, commands, DatabaseCommand{
 		Kind:       DatabaseCommandMarkAgentJobSpawned,
@@ -87,6 +102,8 @@ func MarkAgentJobSpawned(ctx context.Context, commands chan<- DatabaseCommand, a
 	})
 }
 
+// MarkAgentJobSpawnFailed records a failed spawn path as terminal database state.
+// This preserves failures that happen after the intake transaction created a job row.
 func MarkAgentJobSpawnFailed(ctx context.Context, commands chan<- DatabaseCommand, agentJobID int64, reason string) DatabaseCommandResult {
 	return sendDatabaseCommand(ctx, commands, DatabaseCommand{
 		Kind:          DatabaseCommandMarkAgentJobSpawnFailed,
@@ -95,6 +112,8 @@ func MarkAgentJobSpawnFailed(ctx context.Context, commands chan<- DatabaseComman
 	})
 }
 
+// QuarantineSQSMessageWithDatabase stores a malformed SQS delivery before deletion.
+// Router and poller code use it for poison messages that should not keep retrying forever.
 func QuarantineSQSMessageWithDatabase(ctx context.Context, commands chan<- DatabaseCommand, queueSource string, externalMessageID string, receiptHandle string, rawBody string, reason string) DatabaseCommandResult {
 	return sendDatabaseCommand(ctx, commands, DatabaseCommand{
 		Kind:              DatabaseCommandQuarantineSQSMessage,
@@ -106,6 +125,8 @@ func QuarantineSQSMessageWithDatabase(ctx context.Context, commands chan<- Datab
 	})
 }
 
+// UpdateAgentJobECSStatus records the latest non-terminal ECS task status.
+// Running-agent monitors call this on periodic DescribeTasks observations.
 func UpdateAgentJobECSStatus(ctx context.Context, commands chan<- DatabaseCommand, agentJobID int64, lastStatus string, stoppedReason string) DatabaseCommandResult {
 	return sendDatabaseCommand(ctx, commands, DatabaseCommand{
 		Kind:             DatabaseCommandUpdateAgentJobECSStatus,
@@ -115,6 +136,8 @@ func UpdateAgentJobECSStatus(ctx context.Context, commands chan<- DatabaseComman
 	})
 }
 
+// MarkAgentJobTaskStopped records an ECS STOPPED task before an agent terminal event.
+// It protects the database from jobs stuck forever in running if the container crashes.
 func MarkAgentJobTaskStopped(ctx context.Context, commands chan<- DatabaseCommand, agentJobID int64, lastStatus string, stoppedReason string) DatabaseCommandResult {
 	return sendDatabaseCommand(ctx, commands, DatabaseCommand{
 		Kind:             DatabaseCommandMarkAgentJobTaskStopped,
@@ -125,6 +148,8 @@ func MarkAgentJobTaskStopped(ctx context.Context, commands chan<- DatabaseComman
 	})
 }
 
+// sendDatabaseCommand sends one command and blocks until the worker replies or context ends.
+// This gives callers synchronous durable handling while the actual DB writes remain serialized.
 func sendDatabaseCommand(ctx context.Context, commands chan<- DatabaseCommand, command DatabaseCommand) DatabaseCommandResult {
 	reply := make(chan DatabaseCommandResult, 1)
 	command.Reply = reply
@@ -143,6 +168,8 @@ func sendDatabaseCommand(ctx context.Context, commands chan<- DatabaseCommand, c
 	}
 }
 
+// handleDatabaseCommand dispatches one worker command to the concrete DB operation.
+// This is the only switch that mutates SQLite, keeping database behavior centralized.
 func handleDatabaseCommand(ctx context.Context, db *sql.DB, command DatabaseCommand) {
 	var result DatabaseCommandResult
 

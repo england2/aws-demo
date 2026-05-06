@@ -8,6 +8,9 @@ import (
 	dbgen "agent-orchestrator/internal/db/generated"
 )
 
+// quarantineSQSMessage persists malformed or unusable SQS input before deletion.
+// It connects router/poller parse failures to the quarantined_sqs_message table.
+// Defaults are filled here so the database row always has source, body, and reason.
 func quarantineSQSMessage(ctx context.Context, db *sql.DB, queueSource string, externalMessageID string, receiptHandle string, rawBody string, reason string) DatabaseCommandResult {
 	if queueSource == "" {
 		queueSource = "unknown"
@@ -39,6 +42,8 @@ func quarantineSQSMessage(ctx context.Context, db *sql.DB, queueSource string, e
 	}
 }
 
+// selectQuarantinedSQSMessageByID reads a quarantined row by primary key.
+// It is a generated-query wrapper kept for consistency with other DB lookup helpers.
 func selectQuarantinedSQSMessageByID(ctx context.Context, db *sql.DB, id int64) (DatabaseQuarantinedSQSMessageInfo, error) {
 	message, err := dbgen.New(db).GetQuarantinedSQSMessageByID(ctx, id)
 	if err != nil {

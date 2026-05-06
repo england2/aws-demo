@@ -12,6 +12,9 @@ import (
 	"agentproto"
 )
 
+// write_start_time stores the wrapper start time for agent-accessible runtime tools.
+// The check-time tool reads this file to warn Codex about the Fargate task budget.
+// Failures are logged only; missing timing metadata should not stop task startup.
 func write_start_time() {
 	metaDir := "/tmp/agent-meta"
 	if err := os.MkdirAll(metaDir, 0755); err != nil {
@@ -28,6 +31,10 @@ func write_start_time() {
 
 var OPENAI_API_KEY string
 
+// main is the Fargate container's wrapper entrypoint.
+// With a --tool argument it runs a registered deterministic tool for Codex.
+// Without tool args it validates runtime env, emits lifecycle events, starts
+// Codex, streams Codex output to stdout, and reports terminal success/failure.
 func main() {
 	registerBuiltinTools()
 	if len(os.Args) > 1 && runToolArgument(os.Args[1]) {
@@ -117,6 +124,9 @@ func main() {
 	}
 }
 
+// emitEndingToolEvents reports successful completion when Codex invokes --ending.
+// This bridges an agent-controlled deterministic tool call back to the conductor.
+// The text body is intentionally small; richer reports should be emitted separately.
 func emitEndingToolEvents(ctx context.Context) error {
 	eventEmitter, err := NewAgentEventEmitter(ctx)
 	if err != nil {

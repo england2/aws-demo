@@ -15,6 +15,10 @@ import (
 	"github.com/google/uuid"
 )
 
+// AgentEventEmitter sends wrapper lifecycle events to the conductor-owned SQS queue.
+// It connects the Fargate-side wrapper to the EC2 conductor's agent-event router.
+// The emitter depends on AWS SDK credentials from the Fargate task role and on
+// AGENT_FARGATE_EVENTS_QUEUE_URL, AGENT_JOB_ID, AGENT_NAME, and AWS_REGION env vars.
 type AgentEventEmitter struct {
 	client    *sqs.Client
 	queueURL  string
@@ -22,6 +26,9 @@ type AgentEventEmitter struct {
 	agentName string
 }
 
+// NewAgentEventEmitter builds the SQS-backed event emitter used by the wrapper.
+// It validates the runtime environment injected by the conductor before Codex starts.
+// This fails early when the task cannot report status back to the conductor.
 func NewAgentEventEmitter(ctx context.Context) (*AgentEventEmitter, error) {
 	queueURL := strings.TrimSpace(os.Getenv("AGENT_FARGATE_EVENTS_QUEUE_URL"))
 	if queueURL == "" {
@@ -56,6 +63,10 @@ func NewAgentEventEmitter(ctx context.Context) (*AgentEventEmitter, error) {
 	}, nil
 }
 
+// Send emits one agentproto.AgentEvent to the shared Fargate-events SQS queue.
+// The conductor correlates this message by JobID and uses EventID for durable
+// de-duplication once event persistence is implemented. Each send creates a new
+// logical event with a fresh UUID and current UTC timestamp.
 func (emitter *AgentEventEmitter) Send(ctx context.Context, eventType agentproto.AgentEventType, message string) error {
 	event := agentproto.AgentEvent{
 		EventID:   uuid.NewString(),
@@ -82,6 +93,9 @@ func (emitter *AgentEventEmitter) Send(ctx context.Context, eventType agentproto
 	return nil
 }
 
+// SendFailure is the best-effort error reporting path for setup/runtime failures.
+// It intentionally never returns an error because callers are already handling a
+// primary failure path and should not mask that failure with telemetry problems.
 func (emitter *AgentEventEmitter) SendFailure(ctx context.Context, eventType agentproto.AgentEventType, err error) {
 	if emitter == nil || err == nil {
 		return

@@ -7,6 +7,9 @@ import (
 	"time"
 )
 
+// chainDeciderMessage is the minimal row projection needed for alarm chain marking.
+// It deliberately omits raw body and transport fields because chain decisions depend
+// only on alarm identity, event time, period, assignment, and status.
 type chainDeciderMessage struct {
 	ID                 int64
 	CloudWatchAlarm    string
@@ -16,6 +19,9 @@ type chainDeciderMessage struct {
 	JobStatus          *AgentJobStatus
 }
 
+// markChainedCloudWatchMessages scans persisted CloudWatch ALARM rows and marks chained rows.
+// Its only job is database mutation: rows close enough to a previous alarm of the same name
+// are marked duplicate so a later decider can ignore them for agent spawning.
 func markChainedCloudWatchMessages(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT
@@ -58,6 +64,8 @@ func markChainedCloudWatchMessages(ctx context.Context, tx *sql.Tx) error {
 	return rows.Err()
 }
 
+// scanChainDeciderMessage converts one SQL row into the chain decider projection.
+// It parses DB timestamp text once so the decision loop works with time.Time values.
 func scanChainDeciderMessage(rows *sql.Rows) (chainDeciderMessage, error) {
 	var (
 		message            chainDeciderMessage
@@ -91,6 +99,9 @@ func scanChainDeciderMessage(rows *sql.Rows) (chainDeciderMessage, error) {
 	return message, nil
 }
 
+// shouldMarkCloudWatchMessageChained evaluates whether the current alarm continues a chain.
+// It only marks unassigned created messages; already claimed or terminal-status messages
+// must not be rewritten by a later chain pass.
 func shouldMarkCloudWatchMessageChained(previous *chainDeciderMessage, message chainDeciderMessage) bool {
 	if previous == nil || previous.CloudWatchAlarm != message.CloudWatchAlarm {
 		return false

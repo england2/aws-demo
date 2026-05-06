@@ -9,6 +9,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// TestProcessInboundSQSMessageCreatesThenChainsCloudWatchAlarm covers intake + chain marking.
+// The first alarm creates a job; the second close-in-time alarm is marked duplicate.
 func TestProcessInboundSQSMessageCreatesThenChainsCloudWatchAlarm(t *testing.T) {
 	db := newTestDatabase(t)
 	ctx := context.Background()
@@ -42,6 +44,8 @@ func TestProcessInboundSQSMessageCreatesThenChainsCloudWatchAlarm(t *testing.T) 
 	}
 }
 
+// TestQuarantineSQSMessageRecordsPoisonMessage verifies poison SQS messages are durable.
+// The router relies on this before deleting malformed agent-event messages from SQS.
 func TestQuarantineSQSMessageRecordsPoisonMessage(t *testing.T) {
 	db := newTestDatabase(t)
 	ctx := context.Background()
@@ -72,6 +76,8 @@ func TestQuarantineSQSMessageRecordsPoisonMessage(t *testing.T) {
 	}
 }
 
+// newTestDatabase creates an in-memory SQLite DB initialized with the embedded schema.
+// Tests use this to exercise database transitions without touching runtime files.
 func newTestDatabase(t *testing.T) *sql.DB {
 	t.Helper()
 
@@ -88,6 +94,8 @@ func newTestDatabase(t *testing.T) *sql.DB {
 	return db
 }
 
+// testSQSMessage builds a minimal CloudWatch alarm SQS message for database intake tests.
+// The body shape mirrors EventBridge alarm messages delivered through SQS.
 func testSQSMessage(messageID string, eventID string, eventTime string) DatabaseSQSMessageInfo {
 	body := fmt.Sprintf(`{
 		"id": %q,

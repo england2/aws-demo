@@ -12,15 +12,21 @@ import (
 	"ariga.io/atlas/atlasexec"
 )
 
+// DatabaseSchemaMismatchError reports a runtime SQLite schema drift from database.sql.
+// initializeRuntimeDatabase can either fail on this error or create a debug fresh DB.
 type DatabaseSchemaMismatchError struct {
 	RuntimePath string
 	Diff        string
 }
 
+// Error formats the Atlas diff so startup failures include actionable schema details.
+// The caller prints this directly when the conductor refuses to use a mismatched DB.
 func (e DatabaseSchemaMismatchError) Error() string {
 	return fmt.Sprintf("runtime database schema differs from embedded database.sql at %s:\n%s", e.RuntimePath, e.Diff)
 }
 
+// verifyRuntimeDatabaseSchema compares the selected runtime DB against database.sql.
+// It creates a temporary desired SQLite DB, then asks Atlas for a dry-run schema diff.
 func verifyRuntimeDatabaseSchema(ctx context.Context, runtimePath string) error {
 	desiredPath, cleanup, err := createDesiredDatabaseSnapshot()
 	if err != nil {
@@ -42,6 +48,8 @@ func verifyRuntimeDatabaseSchema(ctx context.Context, runtimePath string) error 
 	return nil
 }
 
+// createDesiredDatabaseSnapshot materializes the embedded schema into a temp DB file.
+// Atlas compares this file against the runtime DB because both sides are real SQLite URLs.
 func createDesiredDatabaseSnapshot() (string, func(), error) {
 	dir, err := os.MkdirTemp("", "go-agent-conductor-desired-db-*")
 	if err != nil {
@@ -68,6 +76,9 @@ func createDesiredDatabaseSnapshot() (string, func(), error) {
 	return path, cleanup, nil
 }
 
+// atlasSchemaDiff returns pending Atlas changes from runtime DB to desired DB.
+// It depends on the external `atlas` binary being installed on the conductor host.
+// Empty output means the runtime schema already matches the embedded schema.
 func atlasSchemaDiff(ctx context.Context, fromPath string, toPath string) (string, error) {
 	fromURL, err := sqliteDatabaseURL(fromPath)
 	if err != nil {
@@ -99,6 +110,8 @@ func atlasSchemaDiff(ctx context.Context, fromPath string, toPath string) (strin
 	return strings.Join(result.Changes.Pending, "\n"), nil
 }
 
+// sqliteDatabaseURL converts a filesystem path into an Atlas-compatible SQLite URL.
+// filepath.ToSlash keeps the URL stable across platforms even though deployment is Debian.
 func sqliteDatabaseURL(path string) (string, error) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {

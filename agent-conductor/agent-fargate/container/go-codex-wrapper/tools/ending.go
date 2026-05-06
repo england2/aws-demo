@@ -14,6 +14,9 @@ var endingReport string
 //go:embed ending.go.md
 var EndingGuide string
 
+// Ending prints the final-report instructions that Codex should follow before exit.
+// The wrapper main handles the paired event emission when this tool is invoked as
+// `codex-wrapper --ending`, so this function stays limited to user-facing text.
 func Ending() {
 	fmt.Println(endingReport)
 }

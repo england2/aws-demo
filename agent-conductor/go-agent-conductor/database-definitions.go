@@ -2,6 +2,8 @@ package main
 
 import "time"
 
+// AgentJobStatus is the durable state enum shared by SQS messages and agent jobs.
+// These values are stored as text in SQLite and drive conductor decisions.
 type AgentJobStatus string
 
 const (
@@ -15,6 +17,9 @@ const (
 
 const databaseDir = "go-agent-conductor-runtime-database"
 
+// DatabaseSQSMessageInfo is the conductor's domain view of inbound SQS messages.
+// It combines transport fields, parsed CloudWatch fields, and job assignment state.
+// The struct bridges poll.go, sqlc row conversion, and database decision logic.
 type DatabaseSQSMessageInfo struct {
 	ID                  int64
 	ExternalMessageID   string
@@ -33,6 +38,9 @@ type DatabaseSQSMessageInfo struct {
 	UpdatedAt           time.Time
 }
 
+// DatabaseAgentJobInfo is the conductor's durable view of one Fargate/Codex job.
+// It is created from an actionable inbound message and updated as ECS/runtime state changes.
+// It intentionally carries debug/report fields for post-run inspection.
 type DatabaseAgentJobInfo struct {
 	ID                int64
 	AgentName         string
@@ -51,6 +59,8 @@ type DatabaseAgentJobInfo struct {
 	UpdatedAt         time.Time
 }
 
+// DatabaseAgentEventInfo mirrors wrapper-emitted events once durable event storage returns.
+// It currently documents the intended row shape and conversion boundary for agent_event.
 type DatabaseAgentEventInfo struct {
 	ID          int64
 	EventID     string
@@ -65,6 +75,8 @@ type DatabaseAgentEventInfo struct {
 	ReceivedAt  time.Time
 }
 
+// DatabaseQuarantinedSQSMessageInfo describes malformed or unusable SQS input.
+// The conductor writes these rows before deleting poison messages from their queues.
 type DatabaseQuarantinedSQSMessageInfo struct {
 	ID                int64
 	QueueSource       string

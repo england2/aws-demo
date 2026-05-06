@@ -18,6 +18,9 @@ var db_init string
 
 var db_path string
 
+// check_load_db is the older startup path for selecting or initializing a SQLite DB.
+// New conductor startup uses initializeRuntimeDatabase, but tests and transitional
+// debug paths still depend on the embedded schema and db_path behavior here.
 func check_load_db() error {
 	if err := os.MkdirAll(databaseDir, 0755); err != nil {
 		return fmt.Errorf("create database dir: %w", err)
@@ -60,11 +63,15 @@ func check_load_db() error {
 	return nil
 }
 
+// debugForceNewDB reads the env flag that forces a fresh runtime database at startup.
+// It is intentionally broad in accepted truthy values for shell convenience.
 func debugForceNewDB() bool {
 	value := strings.ToLower(strings.TrimSpace(os.Getenv("DEBUG_FORCE_NEW_DB")))
 	return value == "1" || value == "true" || value == "yes" || value == "on"
 }
 
+// newestDatabasePath finds the newest conductor SQLite DB in the runtime directory.
+// Startup uses this to resume recent state rather than always starting from scratch.
 func newestDatabasePath(dir string) (string, bool, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -101,6 +108,9 @@ func newestDatabasePath(dir string) (string, bool, error) {
 	return filepath.Join(dir, candidates[0].Name()), true, nil
 }
 
+// validateDatabase applies the embedded schema and checks table compatibility.
+// This is a lightweight in-process guard; Atlas performs stricter drift checks in
+// the newer initialization path.
 func validateDatabase(path string) error {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -147,6 +157,8 @@ func validateDatabase(path string) error {
 	return nil
 }
 
+// validateSQSMessageShape scans one sqs_messages_tickets_cloudwatch row shape.
+// It catches incompatible schema changes early by exercising the expected columns.
 func validateSQSMessageShape(db *sql.DB) error {
 	rows, err := db.Query(`
 		SELECT
@@ -213,6 +225,8 @@ func validateSQSMessageShape(db *sql.DB) error {
 	return rows.Err()
 }
 
+// validateAgentJobShape scans one agent_job_info row shape for startup compatibility.
+// The conductor depends on these columns for job lifecycle and ECS tracking state.
 func validateAgentJobShape(db *sql.DB) error {
 	rows, err := db.Query(`
 		SELECT
@@ -282,6 +296,8 @@ func validateAgentJobShape(db *sql.DB) error {
 	return rows.Err()
 }
 
+// validateAgentEventShape scans one agent_event row shape for future event storage.
+// Durable event writes are being refactored, but schema compatibility remains checked.
 func validateAgentEventShape(db *sql.DB) error {
 	rows, err := db.Query(`
 		SELECT
@@ -339,6 +355,8 @@ func validateAgentEventShape(db *sql.DB) error {
 	return rows.Err()
 }
 
+// validateQuarantinedSQSMessageShape checks the poison-message quarantine table shape.
+// The agent-event router depends on this table before deleting malformed SQS messages.
 func validateQuarantinedSQSMessageShape(db *sql.DB) error {
 	rows, err := db.Query(`
 		SELECT

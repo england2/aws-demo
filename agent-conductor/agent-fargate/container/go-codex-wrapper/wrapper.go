@@ -10,6 +10,9 @@ import (
 	"sync"
 )
 
+// CodexCLIWrapper is the runtime configuration for one Codex CLI process.
+// It is populated from Fargate environment variables by main and passed to
+// StartCodexCLIWrapper. The OpenAI key is injected only into the child process env.
 type CodexCLIWrapper struct {
 	SessionName string
 	WorkingDir  string
@@ -17,11 +20,18 @@ type CodexCLIWrapper struct {
 	OpenAIKey   string
 }
 
+// CodexCLIProcess exposes the spawned Codex process to the outer wrapper.
+// Output streams raw stdout/stderr chunks for container logs; Done reports the
+// process exit result so main can emit terminal agent events.
 type CodexCLIProcess struct {
 	Output <-chan string
 	Done   <-chan error
 }
 
+// StartCodexCLIWrapper starts the headless Codex CLI process for the Fargate task.
+// It connects process stdout/stderr to Output and process completion to Done.
+// Runtime behavior is intentionally permissive: Codex runs with bypassed sandbox
+// approvals because the container is already the isolation boundary for this demo.
 func StartCodexCLIWrapper(config CodexCLIWrapper) (*CodexCLIProcess, error) {
 	if strings.TrimSpace(config.WorkingDir) == "" {
 		config.WorkingDir = "/home/root/work"
@@ -84,6 +94,9 @@ func StartCodexCLIWrapper(config CodexCLIWrapper) (*CodexCLIProcess, error) {
 	}, nil
 }
 
+// readRawTerminalStream forwards raw terminal bytes without line buffering.
+// Codex emits terminal-oriented output that may not always end with newlines, so
+// chunk forwarding preserves live logs better than Scanner-based line reading.
 func readRawTerminalStream(output chan<- string, reader io.Reader) {
 	buffered := bufio.NewReader(reader)
 	buffer := make([]byte, 4096)

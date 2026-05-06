@@ -10,6 +10,8 @@ import (
 
 const defaultAgentJobName = "agent-fargate-codex"
 
+// markAgentJobSpawned records the ECS task ARN after RunTask succeeds.
+// It updates both agent_job_info and the linked inbound SQS message status to running.
 func markAgentJobSpawned(ctx context.Context, db *sql.DB, agentJobID int64, taskARN string) DatabaseCommandResult {
 	if taskARN == "" {
 		return DatabaseCommandResult{Err: fmt.Errorf("task ARN is required to mark agent job spawned")}
@@ -47,6 +49,8 @@ func markAgentJobSpawned(ctx context.Context, db *sql.DB, agentJobID int64, task
 	}
 }
 
+// markAgentJobSpawnFailed records a failed Fargate spawn attempt as terminal job state.
+// This is called when ECS RunTask or manager creation fails after the DB created a job.
 func markAgentJobSpawnFailed(ctx context.Context, db *sql.DB, agentJobID int64, reason string) DatabaseCommandResult {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -70,6 +74,9 @@ func markAgentJobSpawnFailed(ctx context.Context, db *sql.DB, agentJobID int64, 
 	}
 }
 
+// updateAgentJobECSStatus stores the latest observed ECS status for a running task.
+// It is called by the running-agent monitor loop and does not make terminal decisions
+// unless the database state was already terminal.
 func updateAgentJobECSStatus(ctx context.Context, db *sql.DB, agentJobID int64, lastStatus string, stoppedReason string) DatabaseCommandResult {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -98,6 +105,8 @@ func updateAgentJobECSStatus(ctx context.Context, db *sql.DB, agentJobID int64, 
 	}
 }
 
+// markAgentJobTaskStopped handles ECS STOPPED before a successful terminal agent event.
+// It protects already-terminal jobs from being overwritten, otherwise marks the job failed.
 func markAgentJobTaskStopped(ctx context.Context, db *sql.DB, agentJobID int64, lastStatus string, stoppedReason string, failureReason string) DatabaseCommandResult {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -145,6 +154,8 @@ func markAgentJobTaskStopped(ctx context.Context, db *sql.DB, agentJobID int64, 
 	}
 }
 
+// createAgentJob inserts the durable agent job spawned from an actionable SQS message.
+// The caller links this job back to the message in the same transaction.
 func createAgentJob(ctx context.Context, tx *sql.Tx, messageID int64) (DatabaseAgentJobInfo, error) {
 	row, err := dbgen.New(tx).CreateAgentJob(ctx, dbgen.CreateAgentJobParams{
 		AgentName:         defaultAgentJobName,
@@ -155,6 +166,8 @@ func createAgentJob(ctx context.Context, tx *sql.Tx, messageID int64) (DatabaseA
 	return generatedAgentJob(row, err, "create agent job")
 }
 
+// failAgentJob transitions a non-terminal job to failed and updates its linked message.
+// It is idempotent for terminal jobs so late ECS or wrapper failures do not rewrite state.
 func failAgentJob(ctx context.Context, tx *sql.Tx, agentJobID int64, reason string) (DatabaseAgentJobInfo, error) {
 	current, err := selectAgentJobByID(ctx, tx, agentJobID)
 	if err != nil {
@@ -181,6 +194,8 @@ func failAgentJob(ctx context.Context, tx *sql.Tx, agentJobID int64, reason stri
 	return agentJob, nil
 }
 
+// succeedAgentJob transitions a non-terminal job to succeeded and stores an optional report path.
+// It updates the linked message status so message-level reads match job-level state.
 func succeedAgentJob(ctx context.Context, tx *sql.Tx, agentJobID int64, reportPath string) (DatabaseAgentJobInfo, error) {
 	current, err := selectAgentJobByID(ctx, tx, agentJobID)
 	if err != nil {
@@ -207,6 +222,8 @@ func succeedAgentJob(ctx context.Context, tx *sql.Tx, agentJobID int64, reportPa
 	return agentJob, nil
 }
 
+// markAgentJobRunning marks a non-terminal job as running from wrapper/ECS activity.
+// This helper is used when runtime events indicate the remote process is alive.
 func markAgentJobRunning(ctx context.Context, tx *sql.Tx, agentJobID int64) (DatabaseAgentJobInfo, error) {
 	current, err := selectAgentJobByID(ctx, tx, agentJobID)
 	if err != nil {
@@ -232,6 +249,8 @@ func markAgentJobRunning(ctx context.Context, tx *sql.Tx, agentJobID int64) (Dat
 	return agentJob, nil
 }
 
+// recordPullRequest stores the PR URL emitted by an agent without marking terminal state.
+// Empty URLs are ignored because the event stream can contain informational messages.
 func recordPullRequest(ctx context.Context, tx *sql.Tx, agentJobID int64, pullRequestURL string) (DatabaseAgentJobInfo, error) {
 	if pullRequestURL == "" {
 		return selectAgentJobByID(ctx, tx, agentJobID)
@@ -245,12 +264,16 @@ func recordPullRequest(ctx context.Context, tx *sql.Tx, agentJobID int64, pullRe
 	return generatedAgentJob(row, err, "record pull request URL")
 }
 
+// selectAgentJobByID reads one job through generated sqlc accessors.
+// It is the common lookup boundary for agent lifecycle transaction helpers.
 func selectAgentJobByID(ctx context.Context, tx *sql.Tx, agentJobID int64) (DatabaseAgentJobInfo, error) {
 	row, err := dbgen.New(tx).GetAgentJobByID(ctx, agentJobID)
 
 	return generatedAgentJob(row, err, "select agent job")
 }
 
+// generatedAgentJob adapts sqlc agent job rows and wraps database operation errors.
+// Keeping this in one place keeps generated structs out of conductor control-flow code.
 func generatedAgentJob(agentJob dbgen.AgentJobInfo, err error, operation string) (DatabaseAgentJobInfo, error) {
 	if err != nil {
 		return DatabaseAgentJobInfo{}, fmt.Errorf("%s: %w", operation, err)
@@ -259,6 +282,8 @@ func generatedAgentJob(agentJob dbgen.AgentJobInfo, err error, operation string)
 	return databaseAgentJobFromGenerated(agentJob), nil
 }
 
+// defaultFailureReason provides a stable fallback for terminal failed job records.
+// The database should always contain a meaningful failure reason for debugging.
 func defaultFailureReason(reason string) string {
 	if reason == "" {
 		return "agent job failed"
@@ -267,6 +292,8 @@ func defaultFailureReason(reason string) string {
 	return reason
 }
 
+// isTerminalAgentJobStatus tells controllers whether a job should stop mutating.
+// Both succeeded and failed are terminal for the current conductor state machine.
 func isTerminalAgentJobStatus(status AgentJobStatus) bool {
 	return status == AgentJobStatusSucceeded || status == AgentJobStatusFailed
 }

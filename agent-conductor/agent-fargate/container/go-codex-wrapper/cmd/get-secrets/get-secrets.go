@@ -15,6 +15,9 @@ import (
 
 const defaultRegion = "us-west-2"
 
+// print_secret is a small compatibility helper for direct secret printing.
+// It uses the same Secrets Manager reader as main and exits fatally on errors.
+// New call sites should prefer main's explicit CLI path with optional --field.
 func print_secret(region string, secretName string) {
 	value, err := readSecretValue(context.Background(), region, secretName, "")
 	if err != nil {
@@ -24,6 +27,9 @@ func print_secret(region string, secretName string) {
 	fmt.Println(value)
 }
 
+// main is the standalone secret-fetching binary shipped in the Fargate image.
+// Entrypoint scripts use it to retrieve runtime secrets without embedding AWS
+// logic in shell. It prints either the raw secret string or one JSON field value.
 func main() {
 	region := flag.String("region", defaultRegion, "AWS region")
 	field := flag.String("field", "", "optional JSON field to print from the secret value")
@@ -43,6 +49,9 @@ func main() {
 	fmt.Println(value)
 }
 
+// readSecretValue returns a trimmed secret string or one requested JSON field.
+// It is the command's validation boundary: empty resolved values are rejected so
+// login/setup scripts fail before launching Codex with unusable credentials.
 func readSecretValue(ctx context.Context, region string, secretName string, field string) (string, error) {
 	secretString, err := getSecretString(ctx, region, secretName)
 	if err != nil {
@@ -64,6 +73,9 @@ func readSecretValue(ctx context.Context, region string, secretName string, fiel
 	return value, nil
 }
 
+// getSecretString reads AWSCURRENT SecretString from AWS Secrets Manager.
+// It depends on standard AWS SDK credential loading, normally the Fargate task role.
+// Binary secrets are deliberately unsupported because current callers need text tokens.
 func getSecretString(ctx context.Context, region string, secretName string) (string, error) {
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
 	if err != nil {
@@ -85,6 +97,9 @@ func getSecretString(ctx context.Context, region string, secretName string) (str
 	return *result.SecretString, nil
 }
 
+// getSecretJSONField extracts a named string field from a JSON secret value.
+// This supports Secrets Manager payloads like {"OPENAI_API_KEY":"..."} while
+// keeping shell entrypoints from needing jq or fragile text parsing.
 func getSecretJSONField(secretString string, field string) (string, error) {
 	var secret map[string]string
 	if err := json.Unmarshal([]byte(secretString), &secret); err != nil {

@@ -10,6 +10,9 @@ const (
 	MessageTypeCloudWatchAlarm = "cloudwatch_alarm"
 )
 
+// ParsedSQSMessage stores normalized fields extracted from an inbound SQS body.
+// Database intake persists these deterministic fields so later deciders do not
+// repeatedly parse raw JSON.
 type ParsedSQSMessage struct {
 	ExternalEventID     *string
 	MessageType         string
@@ -19,6 +22,8 @@ type ParsedSQSMessage struct {
 	AlarmPeriodSeconds  *int64
 }
 
+// eventBridgeCloudWatchAlarmBody models the EventBridge CloudWatch alarm payload.
+// It intentionally includes only fields needed for classification and chain decisions.
 type eventBridgeCloudWatchAlarmBody struct {
 	ID         string `json:"id"`
 	DetailType string `json:"detail-type"`
@@ -39,6 +44,9 @@ type eventBridgeCloudWatchAlarmBody struct {
 	} `json:"detail"`
 }
 
+// ParseSQSMessageBody classifies raw SQS JSON into known conductor message types.
+// Invalid JSON and unsupported event shapes become MessageTypeUnknown rather than
+// hard failures because message handling/quarantine policy lives outside the parser.
 func ParseSQSMessageBody(body []byte) ParsedSQSMessage {
 	parsed := ParsedSQSMessage{
 		MessageType: MessageTypeUnknown,
@@ -76,6 +84,8 @@ func ParseSQSMessageBody(body []byte) ParsedSQSMessage {
 	return parsed
 }
 
+// stringPtrIfNotEmpty converts present parsed JSON strings into optional DB fields.
+// Empty values are treated as absent to keep nullable columns semantically clean.
 func stringPtrIfNotEmpty(value string) *string {
 	if value == "" {
 		return nil

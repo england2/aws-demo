@@ -8,6 +8,8 @@ import (
 	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 )
 
+// TestParseAgentEventSQSMessageRejectsNonNumericJobID protects the quarantine boundary.
+// Non-numeric job IDs cannot map to agent_job_info rows and should not reach routers.
 func TestParseAgentEventSQSMessageRejectsNonNumericJobID(t *testing.T) {
 	message := sqstypes.Message{
 		MessageId:     aws.String("test-message"),

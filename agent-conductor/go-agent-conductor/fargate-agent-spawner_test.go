@@ -7,6 +7,8 @@ import (
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 )
 
+// TestBuildRunTaskInputUsesTerraformTaskDefinitionAndJobOverrides locks core ECS request shape.
+// It verifies Terraform-created task metadata and per-job environment overrides are wired.
 func TestBuildRunTaskInputUsesTerraformTaskDefinitionAndJobOverrides(t *testing.T) {
 	input, err := BuildRunTaskInput(AgentFargateJobConfig{
 		AWSFargateSpawnConfig: AWSFargateSpawnConfig{
@@ -66,6 +68,8 @@ func TestBuildRunTaskInputUsesTerraformTaskDefinitionAndJobOverrides(t *testing.
 	}
 }
 
+// TestBuildRunTaskInputIncludesDebugSSHEnvWhenEnabled verifies optional debug SSH env passthrough.
+// This protects the manual ECS Exec/SSH debugging path used during Fargate development.
 func TestBuildRunTaskInputIncludesDebugSSHEnvWhenEnabled(t *testing.T) {
 	input, err := BuildRunTaskInput(AgentFargateJobConfig{
 		AWSFargateSpawnConfig: AWSFargateSpawnConfig{
@@ -97,6 +101,8 @@ func TestBuildRunTaskInputIncludesDebugSSHEnvWhenEnabled(t *testing.T) {
 	}
 }
 
+// environmentMap converts ECS key-value pairs to a map for readable test assertions.
+// It mirrors how the wrapper sees environment variables inside the Fargate container.
 func environmentMap(environment []ecstypes.KeyValuePair) map[string]string {
 	got := make(map[string]string, len(environment))
 	for _, pair := range environment {
