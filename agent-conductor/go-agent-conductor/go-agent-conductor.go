@@ -10,6 +10,8 @@ import (
 func main() {
 
 	fmt.Println("Agent Conductor started!")
+	debugSSHEnabled, debugSSHPublicKeySecret := DebugSSHRuntimeEnv()
+	fmt.Printf("debug ssh mode: enabled=%t publicKeySecret=%s\n", debugSSHEnabled, debugSSHPublicKeySecret)
 
 	ctx := context.Background()
 
