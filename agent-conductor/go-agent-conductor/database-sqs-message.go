@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"time"
 
 	dbgen "agent-orchestrator/internal/db/generated"
 )
@@ -59,20 +58,20 @@ func processInboundSQSMessage(ctx context.Context, db *sql.DB, sqsMessage Databa
 		}
 	}
 
-	chained, err := isChainedCloudWatchAlarm(ctx, tx, message)
+	if err := markChainedCloudWatchMessages(ctx, tx); err != nil {
+		return DatabaseCommandResult{Err: err}
+	}
+
+	message, err = selectSQSMessageByID(ctx, tx, message.ID)
 	if err != nil {
 		return DatabaseCommandResult{Err: err}
 	}
-	if chained {
-		updated, err := updateMessageStatus(ctx, tx, message.ID, AgentJobStatusDuplicate)
-		if err != nil {
-			return DatabaseCommandResult{Err: err}
-		}
+	if message.JobStatus != nil && *message.JobStatus == AgentJobStatusDuplicate {
 		if err := tx.Commit(); err != nil {
 			return DatabaseCommandResult{Err: fmt.Errorf("commit duplicate message transaction: %w", err)}
 		}
 		return DatabaseCommandResult{
-			Message:          updated,
+			Message:          message,
 			DeleteSQSMessage: true,
 			Reason:           "cloudwatch_alarm_chained_to_existing_incident",
 		}
@@ -106,53 +105,6 @@ func shouldConsiderCloudWatchAlarmForAgentJob(message DatabaseSQSMessageInfo) bo
 		message.CloudWatchAlarmName != nil &&
 		message.CloudWatchState != nil &&
 		*message.CloudWatchState == "ALARM"
-}
-
-func isChainedCloudWatchAlarm(ctx context.Context, tx *sql.Tx, message DatabaseSQSMessageInfo) (bool, error) {
-	if message.CloudWatchAlarmName == nil || message.EventTime == nil {
-		return false, nil
-	}
-
-	periodSeconds := int64(60)
-	if message.AlarmPeriodSeconds != nil && *message.AlarmPeriodSeconds > 0 {
-		periodSeconds = *message.AlarmPeriodSeconds
-	}
-	chainWindow := time.Duration(periodSeconds*4) * time.Second
-
-	rows, err := tx.QueryContext(ctx, `
-		SELECT event_time
-		FROM sqs_messages_tickets_cloudwatch
-		WHERE cloudwatch_alarm_name = ?
-			AND id != ?
-			AND event_time IS NOT NULL
-		ORDER BY event_time DESC
-		LIMIT 1
-	`, *message.CloudWatchAlarmName, message.ID)
-	if err != nil {
-		return false, fmt.Errorf("query previous cloudwatch alarm: %w", err)
-	}
-	defer rows.Close()
-
-	if !rows.Next() {
-		return false, rows.Err()
-	}
-
-	var previousEventTimeText string
-	if err := rows.Scan(&previousEventTimeText); err != nil {
-		return false, fmt.Errorf("scan previous cloudwatch alarm: %w", err)
-	}
-
-	previousEventTime, err := parseDatabaseTime(previousEventTimeText)
-	if err != nil {
-		return false, fmt.Errorf("parse previous cloudwatch event time: %w", err)
-	}
-
-	delta := message.EventTime.Sub(previousEventTime)
-	if delta < 0 {
-		delta = -delta
-	}
-
-	return delta <= chainWindow, rows.Err()
 }
 
 func upsertSQSMessage(ctx context.Context, tx *sql.Tx, sqsMessage DatabaseSQSMessageInfo, parsed ParsedSQSMessage) (DatabaseSQSMessageInfo, error) {

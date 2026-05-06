@@ -38,8 +38,8 @@ func TestBuildRunTaskInputUsesTerraformTaskDefinitionAndJobOverrides(t *testing.
 	if input.LaunchType != ecstypes.LaunchTypeFargate {
 		t.Fatalf("LaunchType = %q, want FARGATE", input.LaunchType)
 	}
-	if aws.ToString(input.ClientToken) != "agent-job-exec-42" {
-		t.Fatalf("ClientToken = %q", aws.ToString(input.ClientToken))
+	if input.ClientToken != nil {
+		t.Fatalf("ClientToken = %q, want nil so repeated local agent job IDs do not conflict", aws.ToString(input.ClientToken))
 	}
 	if !input.EnableExecuteCommand {
 		t.Fatalf("EnableExecuteCommand = false, want true")
