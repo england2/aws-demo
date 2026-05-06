@@ -5,12 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-
-	"agent-orchestrator/internal/agentmanager"
-	"agent-orchestrator/internal/database"
-	"agent-orchestrator/internal/domain"
-	"agent-orchestrator/internal/fargate"
-	"agent-orchestrator/internal/queue"
 )
 
 // main is the conductor entrypoint running on the debian-agent-operation EC2 host.
@@ -19,31 +13,31 @@ import (
 func main() {
 
 	fmt.Println("Agent Conductor started!")
-	debugSSHEnabled, debugSSHPublicKeySecret := fargate.DebugSSHRuntimeEnv()
+	debugSSHEnabled, debugSSHPublicKeySecret := DebugSSHRuntimeEnv()
 	fmt.Printf("debug ssh mode: enabled=%t publicKeySecret=%s\n", debugSSHEnabled, debugSSHPublicKeySecret)
 
 	ctx := context.Background()
 
 	// fail early if the conductor cannot find or initialize a usable database.
-	if err := database.InitializeRuntimeDatabase(ctx); err != nil {
+	if err := initializeRuntimeDatabase(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "load database: %v\n", err)
 		os.Exit(1)
 	}
 
-	databaseCommands, err := database.StartDatabaseWorker(ctx)
+	databaseCommands, err := StartDatabaseWorker(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "start database worker: %v\n", err)
 		os.Exit(1)
 	}
 
-	agentEventRouter, err := agentmanager.StartAgentEventRouter(ctx, databaseCommands, adhocAgentFargateEventsQueueURL)
+	agentEventRouter, err := StartAgentEventRouter(ctx, databaseCommands, adhocAgentFargateEventsQueueURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "start agent event router: %v\n", err)
 		os.Exit(1)
 	}
 	go agentEventRouter.Run(ctx)
 
-	ticketCloudWatchSQSMessageQueue, errors := queue.StartSQSPoller(ctx)
+	ticketCloudWatchSQSMessageQueue, errors := StartSQSPoller(ctx)
 
 	for {
 		select {
@@ -51,7 +45,7 @@ func main() {
 			if !ok {
 				return
 			}
-			result := database.ProcessInboundSQSMessageWithDatabase(ctx, databaseCommands, ticketCloudWatchSQSMessage)
+			result := ProcessInboundSQSMessageWithDatabase(ctx, databaseCommands, ticketCloudWatchSQSMessage)
 			if result.Err != nil {
 				fmt.Fprintf(os.Stderr, "process inbound sqs message: %v\n", result.Err)
 				continue
@@ -68,7 +62,7 @@ func main() {
 			}
 
 			if result.DeleteSQSMessage && durableHandlingSucceeded {
-				if err := queue.DeleteSQSMessage(ctx, ticketCloudWatchSQSMessage.ReceiptHandle); err != nil {
+				if err := DeleteSQSMessage(ctx, ticketCloudWatchSQSMessage.ReceiptHandle); err != nil {
 					fmt.Fprintf(os.Stderr, "delete sqs message: %v\n", err)
 				}
 			}
@@ -84,12 +78,12 @@ func main() {
 // spawnAndTrackAgentJob starts one Fargate Codex worker for a durable agent job.
 // It persists spawn success/failure through the DB worker, registers the running-agent
 // event channel with the router, and starts the ECS/event monitor goroutine.
-func spawnAndTrackAgentJob(ctx context.Context, databaseCommands chan<- database.DatabaseCommand, router *agentmanager.AgentEventRouter, agentJob domain.DatabaseAgentJobInfo, message domain.DatabaseSQSMessageInfo) bool {
+func spawnAndTrackAgentJob(ctx context.Context, databaseCommands chan<- DatabaseCommand, router *AgentEventRouter, agentJob DatabaseAgentJobInfo, message DatabaseSQSMessageInfo) bool {
 	agentJobID := strconv.FormatInt(agentJob.ID, 10)
-	debugSSHEnabled, debugSSHPublicKeySecret := fargate.DebugSSHRuntimeEnv()
-	agentConfig := fargate.AgentFargateJobConfig{
+	debugSSHEnabled, debugSSHPublicKeySecret := DebugSSHRuntimeEnv()
+	agentConfig := AgentFargateJobConfig{
 		AWSFargateSpawnConfig: adhocAWSFargateSpawnConfig,
-		RuntimeEnv: fargate.AgentFargateRuntimeEnv{
+		RuntimeEnv: AgentFargateRuntimeEnv{
 			AgentJobID:              agentJobID,
 			AgentName:               agentJob.AgentName,
 			Prompt:                  buildAgentPrompt(agentJob, message),
@@ -99,10 +93,10 @@ func spawnAndTrackAgentJob(ctx context.Context, databaseCommands chan<- database
 		},
 	}
 
-	spawnResult, err := fargate.SpawnFargateAgent(ctx, agentConfig)
+	spawnResult, err := SpawnFargateAgent(ctx, agentConfig)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "spawn Fargate agentJob=%d: %v\n", agentJob.ID, err)
-		result := database.MarkAgentJobSpawnFailed(ctx, databaseCommands, agentJob.ID, err.Error())
+		result := MarkAgentJobSpawnFailed(ctx, databaseCommands, agentJob.ID, err.Error())
 		if result.Err != nil {
 			fmt.Fprintf(os.Stderr, "mark agentJob spawn failed: %v\n", result.Err)
 			return false
@@ -110,13 +104,13 @@ func spawnAndTrackAgentJob(ctx context.Context, databaseCommands chan<- database
 		return true
 	}
 
-	spawned := database.MarkAgentJobSpawned(ctx, databaseCommands, agentJob.ID, spawnResult.TaskARN)
+	spawned := MarkAgentJobSpawned(ctx, databaseCommands, agentJob.ID, spawnResult.TaskARN)
 	if spawned.Err != nil {
 		fmt.Fprintf(os.Stderr, "mark agentJob spawned: %v\n", spawned.Err)
 		return false
 	}
 
-	runningAgent, err := agentmanager.NewRunningFargateAgent(
+	runningAgent, err := NewRunningFargateAgent(
 		ctx,
 		agentJobID,
 		spawnResult.TaskARN,
@@ -127,7 +121,7 @@ func spawnAndTrackAgentJob(ctx context.Context, databaseCommands chan<- database
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create running Fargate agent manager: %v\n", err)
-		result := database.MarkAgentJobSpawnFailed(ctx, databaseCommands, agentJob.ID, err.Error())
+		result := MarkAgentJobSpawnFailed(ctx, databaseCommands, agentJob.ID, err.Error())
 		if result.Err != nil {
 			fmt.Fprintf(os.Stderr, "mark agentJob manager failed: %v\n", result.Err)
 			return false
@@ -135,7 +129,7 @@ func spawnAndTrackAgentJob(ctx context.Context, databaseCommands chan<- database
 		return true
 	}
 
-	router.Register <- agentmanager.RunningFargateAgentRegistration{
+	router.Register <- RunningFargateAgentRegistration{
 		AgentJobID: runningAgent.AgentJobID,
 		Events:     runningAgent.AgentEvents,
 	}
@@ -151,7 +145,7 @@ func spawnAndTrackAgentJob(ctx context.Context, databaseCommands chan<- database
 
 // buildAgentPrompt creates the initial Codex instruction string for a Fargate worker.
 // It connects durable DB context to the wrapper's AGENT_PROMPT environment variable.
-func buildAgentPrompt(agentJob domain.DatabaseAgentJobInfo, message domain.DatabaseSQSMessageInfo) string {
+func buildAgentPrompt(agentJob DatabaseAgentJobInfo, message DatabaseSQSMessageInfo) string {
 	return fmt.Sprintf(
 		"read agents.md and carry out the task. agent_job_id=%d message_id=%d message_type=%s raw_alert=%s",
 		agentJob.ID,

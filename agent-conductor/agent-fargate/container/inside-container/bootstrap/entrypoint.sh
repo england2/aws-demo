@@ -26,39 +26,20 @@ export GITHUB_TOKEN
 case "${DEBUG_SSH_ENABLED:-}" in
 	1|true|TRUE|yes|YES|on|ON)
 		DEBUG_SSH_PUBLIC_KEY_SECRET_NAME="${DEBUG_SSH_PUBLIC_KEY_SECRET_NAME:-debug_public_ssh_key}"
-		echo "debug ssh: enabled; loading public key secret ${DEBUG_SSH_PUBLIC_KEY_SECRET_NAME}"
 		install -d -m 0700 /root/.ssh
 		get-secrets "$DEBUG_SSH_PUBLIC_KEY_SECRET_NAME" > /root/.ssh/authorized_keys
 		chmod 0600 /root/.ssh/authorized_keys
 		ssh-keygen -A
 		install -d -m 0755 /run/sshd
-		/usr/sbin/sshd -t
 		/usr/sbin/sshd \
-			-E /tmp/agent-meta/sshd.log \
-			-o ListenAddress=0.0.0.0 \
 			-o PasswordAuthentication=no \
-			-o PermitRootLogin=prohibit-password \
-			-o PubkeyAuthentication=yes
-		sleep 0.2
-		if pgrep -x sshd >/dev/null; then
-			echo "debug ssh: sshd started"
-		else
-			echo "debug ssh: sshd did not stay running"
-			cat /tmp/agent-meta/sshd.log || true
-			exit 1
-		fi
-		;;
-	*)
-		echo "debug ssh: disabled"
+			-o PermitRootLogin=prohibit-password
 		;;
 esac
 
 # ==============================================================
 # start codex-wrapper
 # ==============================================================
-
-# debug: sleep infinity while testing ssh
-sleep infinity
 
 cd /home/root/work
 

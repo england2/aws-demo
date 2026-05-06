@@ -1,4 +1,4 @@
-package domain
+package main
 
 import "time"
 
@@ -14,6 +14,8 @@ const (
 	AgentJobStatusIgnored   AgentJobStatus = "ignored"
 	AgentJobStatusDuplicate AgentJobStatus = "duplicate"
 )
+
+const databaseDir = "go-agent-conductor-runtime-database"
 
 // DatabaseSQSMessageInfo is the conductor's domain view of inbound SQS messages.
 // It combines transport fields, parsed CloudWatch fields, and job assignment state.

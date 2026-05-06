@@ -1,4 +1,4 @@
-package agentmanager
+package main
 
 import (
 	"context"
@@ -8,9 +8,6 @@ import (
 	"strconv"
 	"time"
 
-	"agent-orchestrator/internal/database"
-	"agent-orchestrator/internal/fargate"
-	"agent-orchestrator/internal/queue"
 	"agentproto"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -37,9 +34,9 @@ type RunningFargateAgent struct {
 	AgentJobID string
 	TaskARN    string
 
-	AWSFargateSpawnConfig fargate.AWSFargateSpawnConfig
+	AWSFargateSpawnConfig AWSFargateSpawnConfig
 	EventsQueueURL        string
-	DatabaseCommands      chan<- database.DatabaseCommand
+	DatabaseCommands      chan<- DatabaseCommand
 	AgentEvents           chan AgentEventEnvelope
 	Done                  chan struct{}
 
@@ -51,8 +48,8 @@ type RunningFargateAgent struct {
 // It routes parsed events to registered RunningFargateAgent controllers by JobID and
 // quarantines malformed event messages before deleting them from SQS.
 type AgentEventRouter struct {
-	poller           *queue.SQSPoller
-	DatabaseCommands chan<- database.DatabaseCommand
+	poller           *SQSPoller
+	DatabaseCommands chan<- DatabaseCommand
 	Agents           map[string]chan<- AgentEventEnvelope
 	Register         chan RunningFargateAgentRegistration
 	Unregister       chan string
@@ -67,12 +64,12 @@ type RunningFargateAgentRegistration struct {
 
 // StartAgentEventRouter constructs the shared router for the Fargate-events SQS queue.
 // It depends on the same SQS poller abstraction as inbound CloudWatch/ticket messages.
-func StartAgentEventRouter(ctx context.Context, databaseCommands chan<- database.DatabaseCommand, queueURL string) (*AgentEventRouter, error) {
+func StartAgentEventRouter(ctx context.Context, databaseCommands chan<- DatabaseCommand, queueURL string) (*AgentEventRouter, error) {
 	if queueURL == "" {
 		return nil, fmt.Errorf("agent event queue URL is required")
 	}
 
-	poller, err := queue.NewSQSPoller(ctx, queue.SQSPollerConfig{
+	poller, err := NewSQSPoller(ctx, SQSPollerConfig{
 		QueueURL: queueURL,
 	})
 	if err != nil {
@@ -146,7 +143,7 @@ func (router *AgentEventRouter) poll(ctx context.Context, messages chan<- AgentE
 		rawMessages, err := router.poller.ReceiveMessages(ctx)
 		if err != nil {
 			sendAgentEventRouterError(ctx, errors, fmt.Errorf("receive agent event message: %w", err))
-			queue.SleepUnlessCanceled(ctx, 5*time.Second)
+			sleepUnlessCanceled(ctx, 5*time.Second)
 			continue
 		}
 
@@ -177,7 +174,7 @@ func (router *AgentEventRouter) discardMessage(ctx context.Context, message sqst
 	}
 
 	rawBody := aws.ToString(message.Body)
-	result := database.QuarantineSQSMessageWithDatabase(ctx, router.DatabaseCommands, queueSourceAgentFargateEvent, aws.ToString(message.MessageId), receiptHandle, rawBody, reason)
+	result := QuarantineSQSMessageWithDatabase(ctx, router.DatabaseCommands, queueSourceAgentFargateEvent, aws.ToString(message.MessageId), receiptHandle, rawBody, reason)
 	if result.Err != nil {
 		sendAgentEventRouterError(ctx, nil, fmt.Errorf("record quarantined agent event message: %w", result.Err))
 		return
@@ -228,7 +225,7 @@ func ParseAgentEventSQSMessage(message sqstypes.Message) (AgentEventEnvelope, er
 // NewRunningFargateAgent builds the per-task monitor/controller after ECS accepts a task.
 // It creates the ECS client used for DescribeTasks and stores the router delete callback
 // used to acknowledge agent-event SQS deliveries.
-func NewRunningFargateAgent(ctx context.Context, agentJobID string, taskARN string, spawnConfig fargate.AWSFargateSpawnConfig, eventsQueueURL string, databaseCommands chan<- database.DatabaseCommand, deleteAgentEventMessage func(context.Context, string) error) (*RunningFargateAgent, error) {
+func NewRunningFargateAgent(ctx context.Context, agentJobID string, taskARN string, spawnConfig AWSFargateSpawnConfig, eventsQueueURL string, databaseCommands chan<- DatabaseCommand, deleteAgentEventMessage func(context.Context, string) error) (*RunningFargateAgent, error) {
 	awsConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion(spawnConfig.Region))
 	if err != nil {
 		return nil, fmt.Errorf("load AWS config for running Fargate agent: %w", err)
@@ -386,7 +383,7 @@ func (agent *RunningFargateAgent) PollECSStatus(ctx context.Context) bool {
 			fmt.Fprintf(os.Stderr, "parse agent job id for stopped Fargate task: %v\n", err)
 			return false
 		}
-		result := database.MarkAgentJobTaskStopped(ctx, agent.DatabaseCommands, agentJobID, lastStatus, stoppedReason)
+		result := MarkAgentJobTaskStopped(ctx, agent.DatabaseCommands, agentJobID, lastStatus, stoppedReason)
 		if result.Err != nil {
 			fmt.Fprintf(os.Stderr, "mark stopped Fargate agent job: %v\n", result.Err)
 			return false
@@ -399,7 +396,7 @@ func (agent *RunningFargateAgent) PollECSStatus(ctx context.Context) bool {
 		fmt.Fprintf(os.Stderr, "parse agent job id for ECS status: %v\n", err)
 		return false
 	}
-	result := database.UpdateAgentJobECSStatus(ctx, agent.DatabaseCommands, agentJobID, lastStatus, stoppedReason)
+	result := UpdateAgentJobECSStatus(ctx, agent.DatabaseCommands, agentJobID, lastStatus, stoppedReason)
 	if result.Err != nil {
 		fmt.Fprintf(os.Stderr, "update Fargate ECS status: %v\n", result.Err)
 		return false

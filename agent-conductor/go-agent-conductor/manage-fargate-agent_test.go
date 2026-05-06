@@ -1,4 +1,4 @@
-package agentmanager
+package main
 
 import (
 	"strings"

@@ -1,4 +1,4 @@
-package fargate
+package main
 
 import (
 	"testing"

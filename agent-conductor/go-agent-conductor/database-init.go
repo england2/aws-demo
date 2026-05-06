@@ -1,4 +1,4 @@
-package database
+package main
 
 import (
 	_ "embed"
@@ -9,10 +9,8 @@ import (
 	"time"
 )
 
-//go:embed schema/database.sql
+//go:embed sqlc/database.sql
 var db_init string
-
-const databaseDir = "go-agent-conductor-runtime-database"
 
 var db_path string
 

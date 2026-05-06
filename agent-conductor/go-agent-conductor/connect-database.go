@@ -1,4 +1,4 @@
-package database
+package main
 
 import (
 	"context"
@@ -106,10 +106,10 @@ func (c LocalSQLiteRuntimeDatabaseConnector) Open(ctx context.Context) (*sql.DB,
 	return db, nil
 }
 
-// InitializeRuntimeDatabase chooses or creates the SQLite database for this process.
+// initializeRuntimeDatabase chooses or creates the SQLite database for this process.
 // It is the startup gate before the DB worker runs: existing DBs must match the
 // embedded schema, unless debug env opts into creating a fresh replacement DB.
-func InitializeRuntimeDatabase(ctx context.Context) error {
+func initializeRuntimeDatabase(ctx context.Context) error {
 	if err := os.MkdirAll(databaseDir, 0755); err != nil {
 		return fmt.Errorf("create database dir: %w", err)
 	}
@@ -160,7 +160,7 @@ func InitializeRuntimeDatabase(ctx context.Context) error {
 }
 
 // openConductorDB opens the globally selected runtime database for the DB worker.
-// It depends on InitializeRuntimeDatabase having already set db_path.
+// It depends on initializeRuntimeDatabase having already set db_path.
 func openConductorDB(ctx context.Context) (*sql.DB, error) {
 	if db_path == "" {
 		return nil, fmt.Errorf("db_path is empty; call initializeRuntimeDatabase first")

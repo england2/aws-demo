@@ -1,10 +1,10 @@
 version: "2"
 sql:
   - engine: "sqlite"
-    schema: "../internal/database/schema/database.sql"
+    schema: "database.sql"
     queries: "queries"
     gen:
       go:
         package: "dbgen"
-        out: "../internal/database/generated"
+        out: "../internal/db/generated"
         emit_json_tags: true
