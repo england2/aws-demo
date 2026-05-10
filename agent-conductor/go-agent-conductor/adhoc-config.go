@@ -18,5 +18,3 @@ var adhocAWSFargateSpawnConfig = AWSFargateSpawnConfig{
 	},
 	AssignPublicIP: true,
 }
-
-const adhocAgentFargateEventsQueueURL = "https://sqs.us-west-2.amazonaws.com/204772699175/agent-fargate-events"

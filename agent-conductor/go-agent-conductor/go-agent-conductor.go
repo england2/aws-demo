@@ -8,8 +8,8 @@ import (
 )
 
 // main is the conductor entrypoint running on the debian-agent-operation EC2 host.
-// It initializes SQLite, starts the DB worker, starts the agent-event router, and
-// processes inbound CloudWatch/ticket SQS messages into Fargate agent jobs.
+// It initializes SQLite, starts the DB worker, and processes inbound CloudWatch/ticket
+// SQS messages into Fargate agent jobs.
 func main() {
 
 	fmt.Println("Agent Conductor started!")
@@ -29,13 +29,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "start database worker: %v\n", err)
 		os.Exit(1)
 	}
-
-	agentEventRouter, err := StartAgentEventRouter(ctx, databaseCommands, adhocAgentFargateEventsQueueURL)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "start agent event router: %v\n", err)
-		os.Exit(1)
-	}
-	go agentEventRouter.Run(ctx)
 
 	ticketCloudWatchSQSMessageQueue, errors := StartSQSPoller(ctx)
 
@@ -58,7 +51,7 @@ func main() {
 
 			durableHandlingSucceeded := true
 			if result.ShouldSpawnAgentJob && result.AgentJob != nil {
-				durableHandlingSucceeded = spawnAndTrackAgentJob(ctx, databaseCommands, agentEventRouter, *result.AgentJob, result.Message)
+				durableHandlingSucceeded = spawnAndTrackAgentJob(ctx, databaseCommands, *result.AgentJob, result.Message)
 			}
 
 			if result.DeleteSQSMessage && durableHandlingSucceeded {
@@ -76,9 +69,8 @@ func main() {
 }
 
 // spawnAndTrackAgentJob starts one Fargate Codex worker for a durable agent job.
-// It persists spawn success/failure through the DB worker, registers the running-agent
-// event channel with the router, and starts the ECS/event monitor goroutine.
-func spawnAndTrackAgentJob(ctx context.Context, databaseCommands chan<- DatabaseCommand, router *AgentEventRouter, agentJob DatabaseAgentJobInfo, message DatabaseSQSMessageInfo) bool {
+// It persists spawn success/failure through the DB worker and starts the ECS monitor goroutine.
+func spawnAndTrackAgentJob(ctx context.Context, databaseCommands chan<- DatabaseCommand, agentJob DatabaseAgentJobInfo, message DatabaseSQSMessageInfo) bool {
 	agentJobID := strconv.FormatInt(agentJob.ID, 10)
 	debugSSHEnabled, debugSSHPublicKeySecret := DebugSSHRuntimeEnv()
 	agentConfig := AgentFargateJobConfig{
@@ -87,7 +79,6 @@ func spawnAndTrackAgentJob(ctx context.Context, databaseCommands chan<- Database
 			AgentJobID:              agentJobID,
 			AgentName:               agentJob.AgentName,
 			Prompt:                  buildAgentPrompt(agentJob, message),
-			EventsQueueURL:          adhocAgentFargateEventsQueueURL,
 			DebugSSHEnabled:         debugSSHEnabled,
 			DebugSSHPublicKeySecret: debugSSHPublicKeySecret,
 		},
@@ -115,7 +106,6 @@ func spawnAndTrackAgentJob(ctx context.Context, databaseCommands chan<- Database
 		agentJobID,
 		spawnResult.TaskARN,
 		adhocAWSFargateSpawnConfig,
-		adhocAgentFargateEventsQueueURL,
 		databaseCommands,
 	)
 	if err != nil {
@@ -128,15 +118,7 @@ func spawnAndTrackAgentJob(ctx context.Context, databaseCommands chan<- Database
 		return true
 	}
 
-	router.Register <- RunningFargateAgentRegistration{
-		AgentJobID: runningAgent.AgentJobID,
-		Events:     runningAgent.AgentEvents,
-	}
-
-	go func() {
-		runningAgent.Run(ctx)
-		router.Unregister <- runningAgent.AgentJobID
-	}()
+	go runningAgent.Run(ctx)
 
 	fmt.Printf("spawned Fargate agentJob=%d taskARN=%s\n", agentJob.ID, spawnResult.TaskARN)
 	return true

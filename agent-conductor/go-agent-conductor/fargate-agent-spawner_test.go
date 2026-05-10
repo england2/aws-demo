@@ -21,10 +21,9 @@ func TestBuildRunTaskInputUsesTerraformTaskDefinitionAndJobOverrides(t *testing.
 			AssignPublicIP: true,
 		},
 		RuntimeEnv: AgentFargateRuntimeEnv{
-			AgentJobID:     "42",
-			AgentName:      "agent-fargate-codex",
-			Prompt:         "do the work",
-			EventsQueueURL: "https://sqs.us-west-2.amazonaws.com/204772699175/agent-fargate-events",
+			AgentJobID: "42",
+			AgentName:  "agent-fargate-codex",
+			Prompt:     "do the work",
 		},
 	})
 	if err != nil {
@@ -52,10 +51,9 @@ func TestBuildRunTaskInputUsesTerraformTaskDefinitionAndJobOverrides(t *testing.
 
 	environment := input.Overrides.ContainerOverrides[0].Environment
 	want := map[string]string{
-		"AGENT_JOB_ID":                   "42",
-		"AGENT_NAME":                     "agent-fargate-codex",
-		"AGENT_PROMPT":                   "do the work",
-		"AGENT_FARGATE_EVENTS_QUEUE_URL": "https://sqs.us-west-2.amazonaws.com/204772699175/agent-fargate-events",
+		"AGENT_JOB_ID": "42",
+		"AGENT_NAME":   "agent-fargate-codex",
+		"AGENT_PROMPT": "do the work",
 	}
 	got := environmentMap(environment)
 	for key, value := range want {
@@ -83,7 +81,6 @@ func TestBuildRunTaskInputIncludesDebugSSHEnvWhenEnabled(t *testing.T) {
 		RuntimeEnv: AgentFargateRuntimeEnv{
 			AgentJobID:              "42",
 			AgentName:               "agent-fargate-codex",
-			EventsQueueURL:          "https://sqs.us-west-2.amazonaws.com/204772699175/agent-fargate-events",
 			DebugSSHEnabled:         true,
 			DebugSSHPublicKeySecret: "debug_public_ssh_key",
 		},

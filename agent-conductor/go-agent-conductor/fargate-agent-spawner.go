@@ -33,12 +33,11 @@ type AgentFargateJobConfig struct {
 }
 
 // AgentFargateRuntimeEnv is the dynamic configuration injected into the Fargate container.
-// The wrapper reads these env vars to identify its job, prompt Codex, and emit events.
+// The wrapper reads these env vars to identify its job and prompt Codex.
 type AgentFargateRuntimeEnv struct {
 	AgentJobID              string
 	AgentName               string
 	Prompt                  string
-	EventsQueueURL          string
 	DebugSSHEnabled         bool
 	DebugSSHPublicKeySecret string
 }
@@ -134,7 +133,6 @@ func validateAgentFargateJobConfig(agentConfig AgentFargateJobConfig) error {
 		"ContainerName":  spawnConfig.ContainerName,
 		"AgentJobID":     runtimeEnv.AgentJobID,
 		"AgentName":      runtimeEnv.AgentName,
-		"EventsQueueURL": runtimeEnv.EventsQueueURL,
 	}
 
 	var missing []string
@@ -157,14 +155,13 @@ func validateAgentFargateJobConfig(agentConfig AgentFargateJobConfig) error {
 }
 
 // ECSEnvironment converts runtime config into ECS container environment overrides.
-// These values are the Fargate worker's control plane: job identity, prompt, event queue,
-// and optional debug SSH behavior.
+// These values are the Fargate worker's control plane: job identity, prompt, and
+// optional debug SSH behavior.
 func (runtimeEnv AgentFargateRuntimeEnv) ECSEnvironment() []ecstypes.KeyValuePair {
 	environment := []ecstypes.KeyValuePair{
 		{Name: aws.String("AGENT_JOB_ID"), Value: aws.String(runtimeEnv.AgentJobID)},
 		{Name: aws.String("AGENT_NAME"), Value: aws.String(runtimeEnv.AgentName)},
 		{Name: aws.String("AGENT_PROMPT"), Value: aws.String(runtimeEnv.Prompt)},
-		{Name: aws.String("AGENT_FARGATE_EVENTS_QUEUE_URL"), Value: aws.String(runtimeEnv.EventsQueueURL)},
 	}
 	if runtimeEnv.DebugSSHEnabled {
 		secretName := strings.TrimSpace(runtimeEnv.DebugSSHPublicKeySecret)

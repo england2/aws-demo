@@ -3,7 +3,6 @@ module agent-orchestrator
 go 1.26.2
 
 require (
-	agentproto v0.0.0
 	ariga.io/atlas v1.2.0
 	github.com/aws/aws-sdk-go-v2 v1.41.7
 	github.com/aws/aws-sdk-go-v2/config v1.32.1
@@ -11,8 +10,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.42.11
 	modernc.org/sqlite v1.50.0
 )
-
-replace agentproto => ../shared/agentproto
 
 require (
 	github.com/agext/levenshtein v1.2.1 // indirect

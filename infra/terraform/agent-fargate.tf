@@ -110,36 +110,6 @@ resource "aws_iam_role_policy" "agent_fargate_ecs_exec" {
   policy = data.aws_iam_policy_document.agent_fargate_ecs_exec.json
 }
 
-resource "aws_sqs_queue" "agent_fargate_events" {
-  name                       = "agent-fargate-events"
-  message_retention_seconds  = 1209600
-  receive_wait_time_seconds  = 20
-  visibility_timeout_seconds = 60
-
-  tags = {
-    Name = "agent-fargate-events"
-  }
-}
-
-data "aws_iam_policy_document" "agent_fargate_event_send" {
-  statement {
-    sid    = "SendAgentFargateEvents"
-    effect = "Allow"
-
-    actions = [
-      "sqs:SendMessage",
-    ]
-
-    resources = [aws_sqs_queue.agent_fargate_events.arn]
-  }
-}
-
-resource "aws_iam_role_policy" "agent_fargate_event_send" {
-  name   = "agent-fargate-event-send"
-  role   = aws_iam_role.agent_fargate_task.id
-  policy = data.aws_iam_policy_document.agent_fargate_event_send.json
-}
-
 resource "aws_iam_role" "agent_fargate_execution" {
   name               = "agent-fargate-execution-role"
   assume_role_policy = data.aws_iam_policy_document.ecs_task_assume_role.json
@@ -237,20 +207,6 @@ data "aws_iam_policy_document" "agent_operation_fargate_control" {
     ]
   }
 
-  statement {
-    sid    = "PollAgentFargateEvents"
-    effect = "Allow"
-
-    actions = [
-      "sqs:ChangeMessageVisibility",
-      "sqs:DeleteMessage",
-      "sqs:GetQueueAttributes",
-      "sqs:GetQueueUrl",
-      "sqs:ReceiveMessage",
-    ]
-
-    resources = [aws_sqs_queue.agent_fargate_events.arn]
-  }
 }
 
 resource "aws_iam_role_policy" "agent_operation_fargate_control" {

@@ -1,15 +1,12 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
-
-	"agentproto"
 )
 
 // write_start_time stores the wrapper start time for agent-accessible runtime tools.
@@ -33,17 +30,10 @@ var OPENAI_API_KEY string
 
 // main is the Fargate container's wrapper entrypoint.
 // With a --tool argument it runs a registered deterministic tool for Codex.
-// Without tool args it validates runtime env, emits lifecycle events, starts
-// Codex, streams Codex output to stdout, and reports terminal success/failure.
+// Without tool args it validates runtime env, starts Codex, and streams Codex output to stdout.
 func main() {
 	registerBuiltinTools()
 	if len(os.Args) > 1 && runToolArgument(os.Args[1]) {
-		if os.Args[1] == "--ending" {
-			if err := emitEndingToolEvents(context.Background()); err != nil {
-				fmt.Fprintf(os.Stderr, "%v\n", err)
-				os.Exit(1)
-			}
-		}
 		return
 	}
 
@@ -53,36 +43,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	ctx := context.Background()
-	eventEmitter, err := NewAgentEventEmitter(ctx)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(1)
-	}
-
-	// setup
-	if err := eventEmitter.Send(ctx, agentproto.AgentWrapperStarted); err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(1)
-	}
-
-	if err := eventEmitter.Send(ctx, agentproto.AgentSetupStarted); err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(1)
-	}
-
 	write_start_time()
 	OPENAI_API_KEY = strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	if OPENAI_API_KEY == "" {
 		err := fmt.Errorf("OPENAI_API_KEY is required")
-		eventEmitter.SendFailure(ctx, agentproto.AgentSetupFailed, err)
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
 	// hide the start guard from the agent so accidental no-arg tool calls cannot spawn nested agents
 	if err := os.Unsetenv("START_AGENT_ALLOWED"); err != nil {
-		eventEmitter.SendFailure(ctx, agentproto.AgentSetupFailed, err)
 		fmt.Fprintf(os.Stderr, "unset START_AGENT_ALLOWED: %v\n", err)
 		os.Exit(1)
 	}
@@ -95,12 +65,6 @@ func main() {
 		OpenAIKey:   OPENAI_API_KEY,
 	})
 	if err != nil {
-		eventEmitter.SendFailure(ctx, agentproto.AgentSetupFailed, err)
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(1)
-	}
-
-	if err := eventEmitter.Send(ctx, agentproto.CodexStarted); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
@@ -112,30 +76,7 @@ func main() {
 	}()
 
 	if err := <-process.Done; err != nil {
-		eventEmitter.SendFailure(ctx, agentproto.CodexExited, err)
-		eventEmitter.SendFailure(ctx, agentproto.JobFailed, err)
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
-
-	if err := eventEmitter.Send(ctx, agentproto.CodexExited); err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(1)
-	}
-}
-
-// emitEndingToolEvents reports successful completion when Codex invokes --ending.
-// This bridges an agent-controlled deterministic tool call back to the conductor.
-// The text body is intentionally small; richer reports should be emitted separately.
-func emitEndingToolEvents(ctx context.Context) error {
-	eventEmitter, err := NewAgentEventEmitter(ctx)
-	if err != nil {
-		return err
-	}
-
-	if err := eventEmitter.Send(ctx, agentproto.AgentReportedSuccess); err != nil {
-		return err
-	}
-
-	return eventEmitter.Send(ctx, agentproto.JobCompleted)
 }

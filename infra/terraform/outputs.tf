@@ -73,16 +73,6 @@ output "agent_fargate_container_name" {
   value       = "agent-fargate"
 }
 
-output "agent_fargate_events_queue_url" {
-  description = "SQS queue URL for worker-emitted agent Fargate events."
-  value       = aws_sqs_queue.agent_fargate_events.url
-}
-
-output "agent_fargate_events_queue_arn" {
-  description = "SQS queue ARN for worker-emitted agent Fargate events."
-  value       = aws_sqs_queue.agent_fargate_events.arn
-}
-
 output "agent_fargate_task_role_name" {
   description = "IAM role name for the agent Fargate task runtime."
   value       = aws_iam_role.agent_fargate_task.name
