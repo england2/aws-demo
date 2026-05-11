@@ -21,19 +21,9 @@ var newFargateECSClient = func(awsConfig aws.Config) ecsFargateClient {
 	return ecs.NewFromConfig(awsConfig)
 }
 
-// spawnAndTrackAgentJob starts one Fargate Codex worker for a durable agent job.
-// It persists spawn success/failure through the DB worker and starts the ECS monitor goroutine.
-func spawnAndTrackAgentJob(ctx context.Context, databaseCommands chan<- DatabaseCommand, agentJob DatabaseAgentJobInfo, message DatabaseSQSMessageInfo) bool {
-	markSpawnFailed := func(stage string, err error) bool {
-		fmt.Fprintf(os.Stderr, "%s Fargate agentJob=%d: %v\n", stage, agentJob.ID, err)
-		result := MarkAgentJobSpawnFailed(ctx, databaseCommands, agentJob.ID, err.Error())
-		if result.Err != nil {
-			fmt.Fprintf(os.Stderr, "mark agentJob spawn failed: %v\n", result.Err)
-			return false
-		}
-		return true
-	}
-
+// spawnFargateAgent starts one ECS Fargate task and returns the in-memory worker.
+// It has no database dependency so direct smoke tests can exercise the ECS spawn path.
+func spawnFargateAgent(ctx context.Context, agentJob DatabaseAgentJobInfo, message DatabaseSQSMessageInfo) (*FargateAgentWorker, error) {
 	agentJobID := strconv.FormatInt(agentJob.ID, 10)
 	debugSSHEnabled, debugSSHPublicKeySecret := DebugSSHRuntimeEnv()
 	spawnConfig := adhocAWSFargateSpawnConfig
@@ -49,12 +39,12 @@ func spawnAndTrackAgentJob(ctx context.Context, databaseCommands chan<- Database
 		RuntimeEnv:            runtimeEnv,
 	}
 	if err := validateAgentFargateJobConfig(agentConfig); err != nil {
-		return markSpawnFailed("configure", err)
+		return nil, fmt.Errorf("configure Fargate agent: %w", err)
 	}
 
 	awsConfig, err := loadFargateAWSConfig(ctx, spawnConfig.Region)
 	if err != nil {
-		return markSpawnFailed("load AWS config for", err)
+		return nil, fmt.Errorf("load AWS config for Fargate agent: %w", err)
 	}
 	ecsClient := newFargateECSClient(awsConfig)
 
@@ -110,38 +100,53 @@ func spawnAndTrackAgentJob(ctx context.Context, databaseCommands chan<- Database
 
 	output, err := ecsClient.RunTask(ctx, &runTaskInput)
 	if err != nil {
-		return markSpawnFailed("spawn", fmt.Errorf("run Fargate task: %w", err))
+		return nil, fmt.Errorf("run Fargate task: %w", err)
 	}
 	if len(output.Failures) > 0 {
-		return markSpawnFailed("spawn", fmt.Errorf("run Fargate task failed: %s", formatECSFailures(output.Failures)))
+		return nil, fmt.Errorf("run Fargate task failed: %s", formatECSFailures(output.Failures))
 	}
 	if len(output.Tasks) != 1 {
-		return markSpawnFailed("spawn", fmt.Errorf("expected one Fargate task, got %d", len(output.Tasks)))
+		return nil, fmt.Errorf("expected one Fargate task, got %d", len(output.Tasks))
 	}
 
 	taskARN := aws.ToString(output.Tasks[0].TaskArn)
 	if taskARN == "" {
-		return markSpawnFailed("spawn", fmt.Errorf("ECS returned task without task ARN"))
+		return nil, fmt.Errorf("ECS returned task without task ARN")
 	}
 
-	spawned := MarkAgentJobSpawned(ctx, databaseCommands, agentJob.ID, taskARN)
+	return &FargateAgentWorker{
+		AgentJob:       agentJob,
+		TriggerMessage: message,
+		JobConfig:      agentConfig,
+		TaskARN:        taskARN,
+		Done:           make(chan struct{}),
+		ecsClient:      ecsClient,
+	}, nil
+}
+
+// spawnAndTrackAgentJob starts one Fargate Codex worker for a durable agent job.
+// It persists spawn success/failure through the DB worker and starts the ECS monitor goroutine.
+func spawnAndTrackAgentJob(ctx context.Context, databaseCommands chan<- DatabaseCommand, agentJob DatabaseAgentJobInfo, message DatabaseSQSMessageInfo) bool {
+	worker, err := spawnFargateAgent(ctx, agentJob, message)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "spawn Fargate agentJob=%d: %v\n", agentJob.ID, err)
+		result := MarkAgentJobSpawnFailed(ctx, databaseCommands, agentJob.ID, err.Error())
+		if result.Err != nil {
+			fmt.Fprintf(os.Stderr, "mark agentJob spawn failed: %v\n", result.Err)
+			return false
+		}
+		return true
+	}
+
+	spawned := MarkAgentJobSpawned(ctx, databaseCommands, agentJob.ID, worker.TaskARN)
 	if spawned.Err != nil {
 		fmt.Fprintf(os.Stderr, "mark agentJob spawned: %v\n", spawned.Err)
 		return false
 	}
 
-	worker := &FargateAgentWorker{
-		AgentJob:         agentJob,
-		TriggerMessage:   message,
-		DatabaseCommands: databaseCommands,
-		JobConfig:        agentConfig,
-		TaskARN:          taskARN,
-		Done:             make(chan struct{}),
-		ecsClient:        ecsClient,
-	}
-	go worker.Run(ctx)
+	go worker.Run(ctx, databaseCommands)
 
-	fmt.Printf("spawned Fargate agentJob=%d taskARN=%s\n", agentJob.ID, taskARN)
+	fmt.Printf("spawned Fargate agentJob=%d taskARN=%s\n", agentJob.ID, worker.TaskARN)
 	return true
 }
 

@@ -11,14 +11,14 @@ import (
 )
 
 // This file uses go tags to produce a binary that calls the agent spawner function directly for manual testing.
-// Build with:
-//   go build -tags spawnfargate -o /tmp/spawnfargate-smoke
+// Build and run with:
+//   cd agent-conductor/go-agent-conductor
+//   go build -tags spawnfargate -o /tmp/spawnfargate-smoke && /tmp/spawnfargate-smoke
 
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	commands, seenCommands := startSmokeDatabaseCommandWorker(ctx)
 	agentJobID := getenvInt64Default("SMOKE_AGENT_JOB_ID", 900000001)
 	messageID := getenvInt64Default("SMOKE_MESSAGE_ID", 900000001)
 
@@ -34,42 +34,13 @@ func main() {
 	}
 
 	fmt.Printf("spawnfargate smoke: spawning agentJob=%d agentName=%s\n", agentJob.ID, agentJob.AgentName)
-	if !spawnAndTrackAgentJob(ctx, commands, agentJob, message) {
-		fmt.Fprintln(os.Stderr, "spawnfargate smoke: spawn chain returned false")
+	worker, err := spawnFargateAgent(ctx, agentJob, message)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "spawnfargate smoke: spawn failed: %v\n", err)
 		os.Exit(1)
 	}
-	cancel()
 
-	command := <-seenCommands
-	switch command.Kind {
-	case DatabaseCommandMarkAgentJobSpawned:
-		fmt.Printf("spawnfargate smoke: spawned taskARN=%s\n", command.ECSTaskARN)
-	case DatabaseCommandMarkAgentJobSpawnFailed:
-		fmt.Fprintf(os.Stderr, "spawnfargate smoke: spawn failed: %s\n", command.FailureReason)
-		os.Exit(1)
-	default:
-		fmt.Fprintf(os.Stderr, "spawnfargate smoke: unexpected first database command %q\n", command.Kind)
-		os.Exit(1)
-	}
-}
-
-func startSmokeDatabaseCommandWorker(ctx context.Context) (chan<- DatabaseCommand, <-chan DatabaseCommand) {
-	commands := make(chan DatabaseCommand)
-	seenCommands := make(chan DatabaseCommand, 10)
-
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case command := <-commands:
-				seenCommands <- command
-				command.Reply <- DatabaseCommandResult{}
-			}
-		}
-	}()
-
-	return commands, seenCommands
+	fmt.Printf("spawnfargate smoke: spawned taskARN=%s\n", worker.TaskARN)
 }
 
 func getenvInt64Default(name string, fallback int64) int64 {

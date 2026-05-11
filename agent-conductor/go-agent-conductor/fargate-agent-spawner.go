@@ -25,7 +25,7 @@ type AWSFargateSpawnConfig struct {
 }
 
 // AgentFargateJobConfig combines static ECS config with per-agent runtime config.
-// spawnAndTrackAgentJob builds this explicitly before creating the FargateAgentWorker.
+// spawnFargateAgent builds this explicitly before creating the FargateAgentWorker.
 type AgentFargateJobConfig struct {
 	AWSFargateSpawnConfig AWSFargateSpawnConfig
 
@@ -89,7 +89,7 @@ func truthyEnv(name string) bool {
 }
 
 // formatECSFailures renders ECS RunTask failures into one operator-readable string.
-// spawnAndTrackAgentJob includes this in returned errors for SSM/systemd logs.
+// spawnFargateAgent includes this in returned errors for SSM/systemd logs.
 func formatECSFailures(failures []ecstypes.Failure) string {
 	parts := make([]string, 0, len(failures))
 	for _, failure := range failures {

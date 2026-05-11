@@ -12,13 +12,11 @@ import (
 )
 
 // FargateAgentWorker is the server-side owner for one starting/running Fargate
-// agent. spawnAndTrackAgentJob builds and starts it, and Run
-// monitors ECS status while database writes remain behind DatabaseCommands.
+// agent. spawnFargateAgent builds it, and Run monitors ECS status while
+// database writes stay in the caller-provided command channel.
 type FargateAgentWorker struct {
 	AgentJob       DatabaseAgentJobInfo
 	TriggerMessage DatabaseSQSMessageInfo
-
-	DatabaseCommands chan<- DatabaseCommand
 
 	JobConfig AgentFargateJobConfig
 	TaskARN   string
@@ -34,7 +32,7 @@ type ecsFargateClient interface {
 
 // Run is the per-agent control loop for ECS task observations.
 // It exits when ECS reports STOPPED, the database reports terminal state, or context ends.
-func (worker *FargateAgentWorker) Run(ctx context.Context) {
+func (worker *FargateAgentWorker) Run(ctx context.Context, databaseCommands chan<- DatabaseCommand) {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 	defer close(worker.Done)
@@ -42,7 +40,7 @@ func (worker *FargateAgentWorker) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
-			if worker.PollECSStatus(ctx) {
+			if worker.PollECSStatus(ctx, databaseCommands) {
 				return
 			}
 		case <-ctx.Done():
@@ -54,7 +52,7 @@ func (worker *FargateAgentWorker) Run(ctx context.Context) {
 // PollECSStatus observes ECS task state and writes status back through the DB worker.
 // STOPPED is treated as a failed job so jobs do not remain stuck running when the
 // container crashes or exits unexpectedly.
-func (worker *FargateAgentWorker) PollECSStatus(ctx context.Context) bool {
+func (worker *FargateAgentWorker) PollECSStatus(ctx context.Context, databaseCommands chan<- DatabaseCommand) bool {
 	output, err := worker.ecsClient.DescribeTasks(ctx, &ecs.DescribeTasksInput{
 		Cluster: aws.String(worker.JobConfig.AWSFargateSpawnConfig.Cluster),
 		Tasks:   []string{worker.TaskARN},
@@ -78,7 +76,7 @@ func (worker *FargateAgentWorker) PollECSStatus(ctx context.Context) bool {
 			fmt.Fprintf(os.Stderr, "parse agent job id for stopped Fargate task: %v\n", err)
 			return false
 		}
-		result := MarkAgentJobTaskStopped(ctx, worker.DatabaseCommands, agentJobID, lastStatus, stoppedReason)
+		result := MarkAgentJobTaskStopped(ctx, databaseCommands, agentJobID, lastStatus, stoppedReason)
 		if result.Err != nil {
 			fmt.Fprintf(os.Stderr, "mark stopped Fargate agent job: %v\n", result.Err)
 			return false
@@ -91,7 +89,7 @@ func (worker *FargateAgentWorker) PollECSStatus(ctx context.Context) bool {
 		fmt.Fprintf(os.Stderr, "parse agent job id for ECS status: %v\n", err)
 		return false
 	}
-	result := UpdateAgentJobECSStatus(ctx, worker.DatabaseCommands, agentJobID, lastStatus, stoppedReason)
+	result := UpdateAgentJobECSStatus(ctx, databaseCommands, agentJobID, lastStatus, stoppedReason)
 	if result.Err != nil {
 		fmt.Fprintf(os.Stderr, "update Fargate ECS status: %v\n", result.Err)
 		return false

@@ -11,9 +11,9 @@ import (
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 )
 
-// TestSpawnAndTrackAgentJobBuildsRunTaskInputAndMarksSpawned locks core ECS request shape.
+// TestSpawnFargateAgentBuildsRunTaskInput locks core ECS request shape.
 // It verifies Terraform-created task metadata and per-job environment overrides are wired.
-func TestSpawnAndTrackAgentJobBuildsRunTaskInputAndMarksSpawned(t *testing.T) {
+func TestSpawnFargateAgentBuildsRunTaskInput(t *testing.T) {
 	t.Setenv("DEBUG_SSH_ENABLED", "")
 	t.Setenv("DEBUG_SSH_PUBLIC_KEY_SECRET_NAME", "")
 
@@ -22,7 +22,7 @@ func TestSpawnAndTrackAgentJobBuildsRunTaskInputAndMarksSpawned(t *testing.T) {
 			Tasks: []ecstypes.Task{{TaskArn: aws.String("arn:aws:ecs:us-west-2:123:task/42")}},
 		},
 	}
-	commands, seenCommands := installFargateSpawnTestDoubles(t, fakeECS, AWSFargateSpawnConfig{
+	installFargateSpawnTestDoubles(t, fakeECS, AWSFargateSpawnConfig{
 		Region:         "us-west-2",
 		Cluster:        "ecs-cluster-agent-fargate",
 		TaskDefinition: "agent-fargate",
@@ -37,20 +37,12 @@ func TestSpawnAndTrackAgentJobBuildsRunTaskInputAndMarksSpawned(t *testing.T) {
 
 	agentJob := DatabaseAgentJobInfo{ID: 42, AgentName: "agent-fargate-codex"}
 	message := DatabaseSQSMessageInfo{ID: 7, MessageType: "cloudwatch", RawBody: "alarm"}
-	if !spawnAndTrackAgentJob(ctx, commands, agentJob, message) {
-		t.Fatalf("spawnAndTrackAgentJob returned false")
+	worker, err := spawnFargateAgent(ctx, agentJob, message)
+	if err != nil {
+		t.Fatalf("spawnFargateAgent error: %v", err)
 	}
-	cancel()
-
-	command := <-seenCommands
-	if command.Kind != DatabaseCommandMarkAgentJobSpawned {
-		t.Fatalf("database command = %q, want %q", command.Kind, DatabaseCommandMarkAgentJobSpawned)
-	}
-	if command.AgentJobID != 42 {
-		t.Fatalf("database AgentJobID = %d, want 42", command.AgentJobID)
-	}
-	if command.ECSTaskARN != "arn:aws:ecs:us-west-2:123:task/42" {
-		t.Fatalf("database ECSTaskARN = %q", command.ECSTaskARN)
+	if worker.TaskARN != "arn:aws:ecs:us-west-2:123:task/42" {
+		t.Fatalf("TaskARN = %q", worker.TaskARN)
 	}
 
 	input := fakeECS.runTaskInput
@@ -109,9 +101,9 @@ func TestSpawnAndTrackAgentJobBuildsRunTaskInputAndMarksSpawned(t *testing.T) {
 	}
 }
 
-// TestSpawnAndTrackAgentJobIncludesDebugSSHEnvWhenEnabled verifies optional debug SSH env passthrough.
+// TestSpawnFargateAgentIncludesDebugSSHEnvWhenEnabled verifies optional debug SSH env passthrough.
 // This protects the manual ECS Exec/SSH debugging path used during Fargate development.
-func TestSpawnAndTrackAgentJobIncludesDebugSSHEnvWhenEnabled(t *testing.T) {
+func TestSpawnFargateAgentIncludesDebugSSHEnvWhenEnabled(t *testing.T) {
 	t.Setenv("DEBUG_SSH_ENABLED", "true")
 	t.Setenv("DEBUG_SSH_PUBLIC_KEY_SECRET_NAME", "debug_public_ssh_key")
 
@@ -120,15 +112,14 @@ func TestSpawnAndTrackAgentJobIncludesDebugSSHEnvWhenEnabled(t *testing.T) {
 			Tasks: []ecstypes.Task{{TaskArn: aws.String("arn:aws:ecs:us-west-2:123:task/42")}},
 		},
 	}
-	commands, _ := installFargateSpawnTestDoubles(t, fakeECS, validTestFargateSpawnConfig())
+	installFargateSpawnTestDoubles(t, fakeECS, validTestFargateSpawnConfig())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if !spawnAndTrackAgentJob(ctx, commands, DatabaseAgentJobInfo{ID: 42, AgentName: "agent-fargate-codex"}, DatabaseSQSMessageInfo{ID: 7}) {
-		t.Fatalf("spawnAndTrackAgentJob returned false")
+	if _, err := spawnFargateAgent(ctx, DatabaseAgentJobInfo{ID: 42, AgentName: "agent-fargate-codex"}, DatabaseSQSMessageInfo{ID: 7}); err != nil {
+		t.Fatalf("spawnFargateAgent error: %v", err)
 	}
-	cancel()
 
 	got := environmentMap(fakeECS.runTaskInput.Overrides.ContainerOverrides[0].Environment)
 	if got["DEBUG_SSH_ENABLED"] != "true" {
@@ -139,30 +130,54 @@ func TestSpawnAndTrackAgentJobIncludesDebugSSHEnvWhenEnabled(t *testing.T) {
 	}
 }
 
-// TestSpawnAndTrackAgentJobMarksSpawnFailedWhenRunTaskFails verifies durable failure handling.
-func TestSpawnAndTrackAgentJobMarksSpawnFailedWhenRunTaskFails(t *testing.T) {
+// TestSpawnFargateAgentReturnsRunTaskError verifies direct spawn callers do not need a DB channel.
+func TestSpawnFargateAgentReturnsRunTaskError(t *testing.T) {
 	t.Setenv("DEBUG_SSH_ENABLED", "")
 
 	fakeECS := &fakeFargateECSClient{runTaskErr: errors.New("boom")}
-	commands, seenCommands := installFargateSpawnTestDoubles(t, fakeECS, validTestFargateSpawnConfig())
+	installFargateSpawnTestDoubles(t, fakeECS, validTestFargateSpawnConfig())
 
-	if !spawnAndTrackAgentJob(context.Background(), commands, DatabaseAgentJobInfo{ID: 42, AgentName: "agent-fargate-codex"}, DatabaseSQSMessageInfo{ID: 7}) {
+	_, err := spawnFargateAgent(context.Background(), DatabaseAgentJobInfo{ID: 42, AgentName: "agent-fargate-codex"}, DatabaseSQSMessageInfo{ID: 7})
+	if err == nil {
+		t.Fatalf("spawnFargateAgent error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "run Fargate task: boom") {
+		t.Fatalf("error = %q", err.Error())
+	}
+}
+
+// TestSpawnAndTrackAgentJobMarksSpawned verifies DB tracking remains in the conductor wrapper.
+func TestSpawnAndTrackAgentJobMarksSpawned(t *testing.T) {
+	t.Setenv("DEBUG_SSH_ENABLED", "")
+
+	fakeECS := &fakeFargateECSClient{
+		runTaskOutput: &ecs.RunTaskOutput{
+			Tasks: []ecstypes.Task{{TaskArn: aws.String("arn:aws:ecs:us-west-2:123:task/42")}},
+		},
+	}
+	installFargateSpawnTestDoubles(t, fakeECS, validTestFargateSpawnConfig())
+	commands, seenCommands := startTestDatabaseCommandWorker(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if !spawnAndTrackAgentJob(ctx, commands, DatabaseAgentJobInfo{ID: 42, AgentName: "agent-fargate-codex"}, DatabaseSQSMessageInfo{ID: 7}) {
 		t.Fatalf("spawnAndTrackAgentJob returned false")
 	}
+	cancel()
 
 	command := <-seenCommands
-	if command.Kind != DatabaseCommandMarkAgentJobSpawnFailed {
-		t.Fatalf("database command = %q, want %q", command.Kind, DatabaseCommandMarkAgentJobSpawnFailed)
+	if command.Kind != DatabaseCommandMarkAgentJobSpawned {
+		t.Fatalf("database command = %q, want %q", command.Kind, DatabaseCommandMarkAgentJobSpawned)
 	}
 	if command.AgentJobID != 42 {
 		t.Fatalf("database AgentJobID = %d, want 42", command.AgentJobID)
 	}
-	if !strings.Contains(command.FailureReason, "run Fargate task: boom") {
-		t.Fatalf("FailureReason = %q", command.FailureReason)
+	if command.ECSTaskARN != "arn:aws:ecs:us-west-2:123:task/42" {
+		t.Fatalf("database ECSTaskARN = %q", command.ECSTaskARN)
 	}
 }
 
-func installFargateSpawnTestDoubles(t *testing.T, fakeECS *fakeFargateECSClient, spawnConfig AWSFargateSpawnConfig) (chan<- DatabaseCommand, <-chan DatabaseCommand) {
+func installFargateSpawnTestDoubles(t *testing.T, fakeECS *fakeFargateECSClient, spawnConfig AWSFargateSpawnConfig) {
 	t.Helper()
 
 	originalSpawnConfig := adhocAWSFargateSpawnConfig
@@ -183,6 +198,16 @@ func installFargateSpawnTestDoubles(t *testing.T, fakeECS *fakeFargateECSClient,
 		return fakeECS
 	}
 
+	t.Cleanup(func() {
+		adhocAWSFargateSpawnConfig = originalSpawnConfig
+		loadFargateAWSConfig = originalLoadFargateAWSConfig
+		newFargateECSClient = originalNewFargateECSClient
+	})
+}
+
+func startTestDatabaseCommandWorker(t *testing.T) (chan<- DatabaseCommand, <-chan DatabaseCommand) {
+	t.Helper()
+
 	commands := make(chan DatabaseCommand)
 	seenCommands := make(chan DatabaseCommand, 10)
 	go func() {
@@ -193,9 +218,6 @@ func installFargateSpawnTestDoubles(t *testing.T, fakeECS *fakeFargateECSClient,
 	}()
 
 	t.Cleanup(func() {
-		adhocAWSFargateSpawnConfig = originalSpawnConfig
-		loadFargateAWSConfig = originalLoadFargateAWSConfig
-		newFargateECSClient = originalNewFargateECSClient
 		close(commands)
 	})
 
