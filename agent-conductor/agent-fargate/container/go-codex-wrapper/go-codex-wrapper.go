@@ -14,14 +14,14 @@ import (
 // Failures are logged only; missing timing metadata should not stop task startup.
 func write_start_time() {
 	metaDir := "/tmp/agent-meta"
-	if err := os.MkdirAll(metaDir, 0755); err != nil {
+	if err := os.MkdirAll(metaDir, 0o755); err != nil {
 		fmt.Fprintf(os.Stderr, "create agent meta dir: %v\n", err)
 		return
 	}
 
 	startTime := strconv.FormatInt(time.Now().Unix(), 10)
 	startTimePath := filepath.Join(metaDir, "start-time.txt")
-	if err := os.WriteFile(startTimePath, []byte(startTime+"\n"), 0644); err != nil {
+	if err := os.WriteFile(startTimePath, []byte(startTime+"\n"), 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "write start time: %v\n", err)
 	}
 }

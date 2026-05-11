@@ -1,10 +1,11 @@
 package main
 
 import (
-	"codex-wrapper/tools"
 	"fmt"
 	"sort"
 	"strings"
+
+	"codex-wrapper/tools"
 )
 
 // ToolFunc is the in-process entrypoint shape for deterministic Codex tools.

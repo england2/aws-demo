@@ -349,7 +349,7 @@ func waitForTaskRunning(ctx context.Context, client *ecs.Client, cluster string,
 }
 
 func writeState(path string, values map[string]string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create state dir: %w", err)
 	}
 
