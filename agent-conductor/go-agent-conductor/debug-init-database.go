@@ -37,7 +37,7 @@ func createRuntimeDatabaseFile(ctx context.Context, debug bool) (string, error) 
 		return "", err
 	}
 
-	if err := os.MkdirAll(databaseDir, 0755); err != nil {
+	if err := os.MkdirAll(databaseDir, 0o755); err != nil {
 		return "", fmt.Errorf("create database dir: %w", err)
 	}
 

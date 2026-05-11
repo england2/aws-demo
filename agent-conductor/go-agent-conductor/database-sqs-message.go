@@ -121,7 +121,8 @@ func upsertSQSMessage(ctx context.Context, tx *sql.Tx, sqsMessage DatabaseSQSMes
 		messageType = MessageTypeUnknown
 	}
 
-	_, err := tx.ExecContext(ctx, `
+	_, err := tx.ExecContext(
+		ctx, `
 		INSERT INTO sqs_messages_tickets_cloudwatch (
 			external_message_id,
 			receipt_handle,

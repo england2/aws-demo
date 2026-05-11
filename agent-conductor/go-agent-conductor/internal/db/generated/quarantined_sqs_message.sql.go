@@ -44,7 +44,8 @@ type CreateQuarantinedSQSMessageParams struct {
 }
 
 func (q *Queries) CreateQuarantinedSQSMessage(ctx context.Context, arg CreateQuarantinedSQSMessageParams) (QuarantinedSqsMessage, error) {
-	row := q.db.QueryRowContext(ctx, createQuarantinedSQSMessage,
+	row := q.db.QueryRowContext(
+		ctx, createQuarantinedSQSMessage,
 		arg.QueueSource,
 		arg.ExternalMessageID,
 		arg.ReceiptHandle,

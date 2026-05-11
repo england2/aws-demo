@@ -12,7 +12,6 @@ import (
 // It initializes SQLite, starts the DB worker, and processes inbound CloudWatch/ticket
 // SQS messages into Fargate agent jobs.
 func main() {
-
 	fmt.Println("Agent Conductor started!")
 	debugSSHEnabled, debugSSHPublicKeySecret := DebugSSHRuntimeEnv()
 	fmt.Printf("debug ssh mode: enabled=%t publicKeySecret=%s\n", debugSSHEnabled, debugSSHPublicKeySecret)

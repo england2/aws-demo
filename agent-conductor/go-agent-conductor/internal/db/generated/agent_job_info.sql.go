@@ -254,7 +254,8 @@ type MarkAgentJobSpawnedParams struct {
 }
 
 func (q *Queries) MarkAgentJobSpawned(ctx context.Context, arg MarkAgentJobSpawnedParams) (AgentJobInfo, error) {
-	row := q.db.QueryRowContext(ctx, markAgentJobSpawned,
+	row := q.db.QueryRowContext(
+		ctx, markAgentJobSpawned,
 		arg.Status,
 		arg.EcsTaskArn,
 		arg.EcsLastStatus,

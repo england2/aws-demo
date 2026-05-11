@@ -110,7 +110,7 @@ func (c LocalSQLiteRuntimeDatabaseConnector) Open(ctx context.Context) (*sql.DB,
 // It is the startup gate before the DB worker runs: existing DBs must match the
 // embedded schema, unless debug env opts into creating a fresh replacement DB.
 func initializeRuntimeDatabase(ctx context.Context) error {
-	if err := os.MkdirAll(databaseDir, 0755); err != nil {
+	if err := os.MkdirAll(databaseDir, 0o755); err != nil {
 		return fmt.Errorf("create database dir: %w", err)
 	}
 
