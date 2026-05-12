@@ -6,8 +6,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strconv"
 	"time"
+
+	"agent-orchestrator/fargate"
 )
 
 // This file uses go tags to produce a binary that calls the agent spawner function directly for manual testing.
@@ -19,39 +20,23 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	agentJobID := getenvInt64Default("SMOKE_AGENT_JOB_ID", 900000001)
-	messageID := getenvInt64Default("SMOKE_MESSAGE_ID", 900000001)
-
-	agentJob := DatabaseAgentJobInfo{
-		ID:        agentJobID,
-		AgentName: defaultAgentJobName,
-		Status:    AgentJobStatusCreated,
-	}
-	message := DatabaseSQSMessageInfo{
-		ID:          messageID,
-		RawBody:     getenvDefault("SMOKE_RAW_ALERT", "spawnfargate smoke test"),
-		MessageType: getenvDefault("SMOKE_MESSAGE_TYPE", "smoke"),
+	message := SQSMessage{
+		ExternalMessageID: getenvDefault("SMOKE_MESSAGE_ID", "spawnfargate-smoke"),
+		RawBody:           getenvDefault("SMOKE_RAW_ALERT", "spawnfargate smoke test"),
 	}
 
-	fmt.Printf("spawnfargate smoke: spawning agentJob=%d agentName=%s\n", agentJob.ID, agentJob.AgentName)
-	worker, err := spawnFargateAgent(ctx, agentJob, message)
+	fmt.Printf("spawnfargate smoke: spawning agentName=%s\n", defaultAgentName)
+	result, err := fargate.Spawn(ctx, fargate.SpawnRequest{
+		Config: adhocFargateSpawnConfig,
+		Environment: fargate.WithDebugSSHEnvironment(map[string]string{
+			"AGENT_NAME":   defaultAgentName,
+			"AGENT_PROMPT": buildAgentPrompt(message),
+		}),
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "spawnfargate smoke: spawn failed: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("spawnfargate smoke: spawned taskARN=%s\n", worker.TaskARN)
-}
-
-func getenvInt64Default(name string, fallback int64) int64 {
-	value := os.Getenv(name)
-	if value == "" {
-		return fallback
-	}
-	parsed, err := strconv.ParseInt(value, 10, 64)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "invalid %s=%q: %v\n", name, value, err)
-		os.Exit(1)
-	}
-	return parsed
+	fmt.Printf("spawnfargate smoke: spawned taskARN=%s\n", result.TaskARN)
 }

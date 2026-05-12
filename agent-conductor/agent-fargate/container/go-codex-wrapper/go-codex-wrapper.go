@@ -29,17 +29,11 @@ func write_start_time() {
 var OPENAI_API_KEY string
 
 // main is the Fargate container's wrapper entrypoint.
-// With a --tool argument it runs a registered deterministic tool for Codex.
-// Without tool args it validates runtime env, starts Codex, and streams Codex output to stdout.
+// It validates runtime env, starts Codex, and streams Codex output to stdout.
 func main() {
-	registerBuiltinTools()
-	if len(os.Args) > 1 && runToolArgument(os.Args[1]) {
-		return
-	}
-
 	// gaurd against the agent accidentally spawning another codex-wrapper by calling the binary directly.
 	if os.Getenv("START_AGENT_ALLOWED") != "true" {
-		fmt.Fprintln(os.Stderr, "Incorrect tool envokation! do `codex-wrapper -- <toolname>`")
+		fmt.Fprintln(os.Stderr, "Incorrect wrapper invocation. Use custom-codex-tools for helper tools.")
 		os.Exit(1)
 	}
 

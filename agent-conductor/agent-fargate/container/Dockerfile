@@ -15,11 +15,11 @@ WORKDIR /src
 COPY agent-conductor/agent-fargate/container/go-codex-wrapper/go.mod agent-conductor/agent-fargate/container/go-codex-wrapper/go.sum ./
 COPY agent-conductor/shared/agentproto/ /shared/agentproto/
 COPY agent-conductor/agent-fargate/container/go-codex-wrapper/*.go ./
-COPY agent-conductor/agent-fargate/container/go-codex-wrapper/tools/ ./tools/
 COPY agent-conductor/agent-fargate/container/go-codex-wrapper/cmd/ ./cmd/
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -o /out/codex-wrapper .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -o /out/get-secrets ./cmd/get-secrets
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -o /out/custom-codex-tools ./cmd/custom-codex-tools
 
 # ==============================================================
 # agent runtime container
@@ -82,6 +82,7 @@ RUN chmod +x /entrypoint.sh
 
 COPY --from=build /out/codex-wrapper /usr/local/bin/codex-wrapper
 COPY --from=build /out/get-secrets /usr/local/bin/get-secrets
+COPY --from=build /out/custom-codex-tools /usr/local/bin/custom-codex-tools
 
 WORKDIR /home/root/work/
 

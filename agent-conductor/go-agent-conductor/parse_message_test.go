@@ -3,7 +3,6 @@ package main
 import "testing"
 
 // TestParseSQSMessageBodyCloudWatchAlarm verifies EventBridge alarm fields are normalized.
-// The database intake logic depends on these parsed fields for chain and spawn decisions.
 func TestParseSQSMessageBodyCloudWatchAlarm(t *testing.T) {
 	body := []byte(`{
 		"id": "event-1",

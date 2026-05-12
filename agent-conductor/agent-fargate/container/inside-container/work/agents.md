@@ -14,8 +14,8 @@ You **must periodically check the current execution time** to avoid exceeding th
 
 Run the following command at regular intervals:
 
-`codex-wrapper '--check-time'`
+`custom-codex-tools --check-time`
 
 ## Tools
 
-Run `codex-wrapper --print-tool-guides` to see your available tools.
+Run `custom-codex-tools --print-tool-guides` to see your available tools.

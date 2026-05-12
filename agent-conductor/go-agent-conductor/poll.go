@@ -33,37 +33,28 @@ type SQSPollerConfig struct {
 	VisibilityTimeoutSeconds int32
 }
 
-// StartSQSPoller starts the primary ticket/CloudWatch input queue consumer.
-// It returns channels so main can process one parsed SQS delivery at a time.
-func StartSQSPoller(ctx context.Context) (<-chan DatabaseSQSMessageInfo, <-chan error) {
-	messages := make(chan DatabaseSQSMessageInfo)
+// SQSMessage is one received SQS delivery plus the receipt handle needed to delete it.
+type SQSMessage struct {
+	ExternalMessageID string
+	ReceiptHandle     string
+	Body              []byte
+	RawBody           string
+}
+
+// Start starts this poller's queue consumer.
+// It returns channels so main can handle one SQS delivery at a time.
+func (p *SQSPoller) Start(ctx context.Context) (<-chan SQSMessage, <-chan error) {
+	messages := make(chan SQSMessage)
 	errors := make(chan error)
 
 	go func() {
 		defer close(messages)
 		defer close(errors)
 
-		poller, err := NewTicketCloudWatchSQSPoller(ctx)
-		if err != nil {
-			sendPollError(ctx, errors, err)
-			return
-		}
-
-		poller.Poll(ctx, messages, errors)
+		p.Poll(ctx, messages, errors)
 	}()
 
 	return messages, errors
-}
-
-// DeleteSQSMessage deletes one primary input queue delivery by receipt handle.
-// Main calls this only after durable database handling and any spawn attempt are complete.
-func DeleteSQSMessage(ctx context.Context, receiptHandle string) error {
-	poller, err := NewTicketCloudWatchSQSPoller(ctx)
-	if err != nil {
-		return err
-	}
-
-	return poller.DeleteMessage(ctx, receiptHandle)
 }
 
 // NewTicketCloudWatchSQSPoller builds the poller for the conductor's inbound work queue.
@@ -76,10 +67,9 @@ func NewTicketCloudWatchSQSPoller(ctx context.Context) (*SQSPoller, error) {
 	})
 }
 
-// Poll continuously long-polls SQS and emits parsed database message structs.
-// It intentionally receives one SQS message at a time to keep the conductor's
-// database-first intake and agent spawning flow simple and serialized.
-func (p *SQSPoller) Poll(ctx context.Context, messages chan<- DatabaseSQSMessageInfo, errors chan<- error) {
+// Poll continuously long-polls SQS and emits raw message deliveries.
+// It intentionally receives one SQS message at a time to keep spawning serialized.
+func (p *SQSPoller) Poll(ctx context.Context, messages chan<- SQSMessage, errors chan<- error) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -177,13 +167,12 @@ func (p *SQSPoller) DeleteMessage(ctx context.Context, receiptHandle string) err
 }
 
 // parseSQSMessage converts AWS transport data into the conductor's raw message model.
-// Business parsing happens later in the database intake path so raw bodies are preserved.
-func parseSQSMessage(message types.Message) (DatabaseSQSMessageInfo, error) {
+func parseSQSMessage(message types.Message) (SQSMessage, error) {
 	if message.Body == nil {
-		return DatabaseSQSMessageInfo{}, fmt.Errorf("sqs message %s has empty body", aws.ToString(message.MessageId))
+		return SQSMessage{}, fmt.Errorf("sqs message %s has empty body", aws.ToString(message.MessageId))
 	}
 
-	return DatabaseSQSMessageInfo{
+	return SQSMessage{
 		ExternalMessageID: aws.ToString(message.MessageId),
 		ReceiptHandle:     aws.ToString(message.ReceiptHandle),
 		Body:              []byte(*message.Body),

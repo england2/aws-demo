@@ -11,8 +11,7 @@ const (
 )
 
 // ParsedSQSMessage stores normalized fields extracted from an inbound SQS body.
-// Database intake persists these deterministic fields so later deciders do not
-// repeatedly parse raw JSON.
+// Callers can use these deterministic fields when building prompts or logs.
 type ParsedSQSMessage struct {
 	ExternalEventID     *string
 	MessageType         string
@@ -84,8 +83,7 @@ func ParseSQSMessageBody(body []byte) ParsedSQSMessage {
 	return parsed
 }
 
-// stringPtrIfNotEmpty converts present parsed JSON strings into optional DB fields.
-// Empty values are treated as absent to keep nullable columns semantically clean.
+// stringPtrIfNotEmpty converts present parsed JSON strings into optional fields.
 func stringPtrIfNotEmpty(value string) *string {
 	if value == "" {
 		return nil
