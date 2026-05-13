@@ -14,8 +14,10 @@ terraform.tfvars
 *.tfplan
 crash.log
 
-# wildcard
+# wildcard ignores
 ignore.*
+\#ignore.*
+.\#ignore.*
 
 # keep documentation files, (p) real md files
 !*.docs.md
