@@ -1,0 +1,13 @@
+#!/usr/bin/env fish
+set -gx Z_DATA /tmp/database-generate-db-proto-z-data
+source (dirname (realpath (status filename)))/helpers.fish
+
+set sqlc_root "$repo_root/database/database-and-scheduler/sqlc"
+
+if not test -f "$sqlc_root/sqlc.yaml"
+    echo "error: expected sqlc config at $sqlc_root/sqlc.yaml" >&2
+    exit 1
+end
+
+cd "$sqlc_root"; or exit 1
+sqlc generate $argv

@@ -1,0 +1,22 @@
+#!/usr/bin/env fish
+source (dirname (realpath (status filename)))/helpers.fish
+
+set module_root "$repo_root/database/database-and-scheduler"
+set data_dir "$module_root/TESTDATA/data"
+set unix_time (date +%s)
+set db_path "$data_dir/testdb-$unix_time.sqlite"
+
+if not test -f "$module_root/go.mod"
+    echo "error: expected Go module at $module_root" >&2
+    exit 1
+end
+
+mkdir -p "$data_dir"; or exit 1
+
+cd "$module_root"; or exit 1
+/home/t/.go/bin/go run ./TESTDATA/scripts "$db_path"; or exit 1
+/home/t/.go/bin/go run . -test-db-loc "$db_path"
+
+# print!
+/home/t/programming/aws1-sideprojects/database/database-and-scheduler/TESTDATA/scripts/print-sqlite-db.py \
+    --omit-message-body $db_path

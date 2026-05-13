@@ -1,21 +1,16 @@
 #!/usr/bin/env fish
 source (dirname (realpath (status filename)))/helpers.fish
-set proto_dir "$repo_root/src/proto"
+set proto_dir "$repo_root/conductor-and-worker/proto"
 
-if not command -q protoc
-    echo "error: protoc is missing or not on PATH" >&2
-    exit 1
+function require_commands
+    for cmd in $argv
+        if not command -q $cmd
+            echo "error: $cmd is missing or not on PATH" >&2 ; exit 1
+        end
+    end
 end
 
-if not command -q protoc-gen-go
-    echo "error: protoc-gen-go is missing or not on PATH" >&2
-    exit 1
-end
-
-if not command -q protoc-gen-go-grpc
-    echo "error: protoc-gen-go-grpc is missing or not on PATH" >&2
-    exit 1
-end
+require_commands protoc protoc-gen-go protoc-gen-go-grpc
 
 protoc \
     --proto_path="$proto_dir" \

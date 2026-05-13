@@ -1,0 +1,17 @@
+#!/usr/bin/env fish
+source (dirname (realpath (status filename)))/helpers.fish
+
+set module_root "$repo_root/database/database-and-scheduler"
+
+if not test -f "$module_root/go.mod"
+    echo "error: expected Go module at $module_root" >&2
+    exit 1
+end
+
+set go_bin /home/t/.go/bin/go
+if not test -x "$go_bin"
+    set go_bin go
+end
+
+cd "$module_root"; or exit 1
+$go_bin run . $argv
