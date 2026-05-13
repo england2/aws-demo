@@ -1,5 +1,0 @@
-#!/usr/bin/env fish
-source (dirname (realpath (status filename)))/helpers.fish
-cdgit
-fd '\.go$' . --exclude proto -x gofumpt -l
-fd '\.go$' . --exclude proto -x gofumpt -w
