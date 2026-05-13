@@ -18,7 +18,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /out/conductor .
 FROM debian:bookworm-slim
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates curl sqlite3 zip unzip && \
+    apt-get install -y --no-install-recommends ca-certificates curl sqlite3 tmux zip unzip && \
     curl -sSf https://atlasgo.sh | sh && \
     mkdir -p /conductor /usr/local/share/conductor && \
     rm -rf /var/lib/apt/lists/*
