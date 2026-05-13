@@ -83,6 +83,17 @@ func (w *Worker) InsertAlarmMessages(ctx context.Context, messages []IncomingMes
 	return nil
 }
 
+// InsertAlarmMessageAndRunScheduling persists one alarm message and immediately runs the scheduler transaction.
+// Conductor polling calls this after it has translated an SQS delivery into IncomingMessage; the returned decisions
+// are handed back to main so external SQS delete ordering stays outside the scheduler package.
+func (w *Worker) InsertAlarmMessageAndRunScheduling(ctx context.Context, message IncomingMessage) ([]shared.ScheduleDecision, error) {
+	if err := w.InsertAlarmMessages(ctx, []IncomingMessage{message}); err != nil {
+		return nil, err
+	}
+
+	return w.RunScheduling(ctx)
+}
+
 func (w *Worker) InsertTicketMessages(ctx context.Context, messages []IncomingMessage) error {
 	for _, message := range messages {
 		if _, err := w.q.InsertSQSTicketMessage(ctx, sqlcgen.InsertSQSTicketMessageParams{

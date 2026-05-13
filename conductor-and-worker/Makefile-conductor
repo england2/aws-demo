@@ -12,7 +12,10 @@ CONDUCTOR_BIN ?= $(OUT_DIR)/conductor
 .PHONY: build
 build: $(CONDUCTOR_BIN)
 
-$(CONDUCTOR_BIN):
+.PHONY: FORCE
+FORCE:
+
+$(CONDUCTOR_BIN): FORCE
 	@mkdir -p "$(OUT_DIR)"
 	cd "$(CONDUCTOR_DIR)" && "$(GO)" build -o "$(CONDUCTOR_BIN)" .
 	@printf 'built %s\n' "$(CONDUCTOR_BIN)"

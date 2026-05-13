@@ -63,7 +63,6 @@ RUN mkdir -p /tmp/agent-meta /worker/work && \
     rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g @openai/codex@0.128.0
-# ai--done
 
 COPY --from=build /out/worker /usr/local/bin/worker
 COPY --from=build /out/get-secrets /usr/local/bin/get-secrets

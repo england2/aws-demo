@@ -236,6 +236,8 @@ func main() {
 // It starts after flags provide the scheduler DB path, then each polled SQS message is inserted, scheduled,
 // printed, and deleted from SQS only after the scheduler accepts it.
 func main_testing() {
+	fmt.Printf("in main_testing\n\n")
+
 	flag.Parse()
 
 	schedulerDatabasePath := testSchedulerDatabasePathFromFlags()
@@ -267,9 +269,16 @@ func main_testing() {
 			if !ok {
 				return
 			}
-			// ai q Quick: is it possible that this function could be defined as a receiver on the workerer, or does the data separation between packages make that difficult.
-			if err := insertPolledSQSMessageAndRunScheduler(ctx, schedulerWorker, sqsPoller, polledSQSMessage); err != nil {
+			scheduleDecisions, err := insertPolledSQSMessageAndRunScheduler(ctx, schedulerWorker, polledSQSMessage)
+			if err == nil {
+				err = sqsPoller.DeleteMessage(ctx, polledSQSMessage.ReceiptHandle)
+			}
+			if err != nil {
 				fmt.Fprintf(os.Stderr, "handle sqs message %q: %v\n", polledSQSMessage.ExternalMessageID, err)
+				continue
+			}
+			if err := printSchedulerDecisions(scheduleDecisions); err != nil {
+				fmt.Fprintf(os.Stderr, "print scheduler decisions for sqs message %q: %v\n", polledSQSMessage.ExternalMessageID, err)
 			}
 		case err, ok := <-pollErrors:
 			if !ok {

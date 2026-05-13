@@ -14,15 +14,6 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-type testSQSMessageDeleter struct {
-	deletedReceiptHandles []string
-}
-
-func (deleter *testSQSMessageDeleter) DeleteMessage(_ context.Context, receiptHandle string) error {
-	deleter.deletedReceiptHandles = append(deleter.deletedReceiptHandles, receiptHandle)
-	return nil
-}
-
 // TestSchedulerIncomingMessageFromPolledSQSMessagePreservesSchedulerFields checks the polling-to-scheduler boundary.
 // It runs after ParseSQSMessageBody would have extracted the account number and confirms the scheduler receives
 // the raw SQS body unchanged, because that raw body is what the database stores and schedules on.
@@ -65,10 +56,10 @@ func TestSchedulerIncomingMessageFromPolledSQSMessageRequiresAccountNumber(t *te
 	}
 }
 
-// TestInsertPolledSQSMessageAndRunSchedulerPersistsSchedulesAndDeletes exercises the smoke-test message path.
-// It starts with one existing alarm row, inserts the polled CloudWatch message, runs scheduler chaining, and only
-// then deletes the SQS receipt through the same interface that SQSPoller implements in main_testing.
-func TestInsertPolledSQSMessageAndRunSchedulerPersistsSchedulesAndDeletes(t *testing.T) {
+// TestInsertPolledSQSMessageAndRunSchedulerPersistsSchedulesAndReturnsDecisions exercises the scheduler handoff.
+// It starts with one existing alarm row, inserts the polled CloudWatch message, runs scheduler chaining, and returns
+// decisions to the caller so main_testing can own the later SQS delete.
+func TestInsertPolledSQSMessageAndRunSchedulerPersistsSchedulesAndReturnsDecisions(t *testing.T) {
 	ctx := context.Background()
 	schedulerDatabasePath := createEmptyMainTestingSchedulerDatabase(t)
 	insertPreviousAlarmMessage(t, schedulerDatabasePath)
@@ -79,8 +70,7 @@ func TestInsertPolledSQSMessageAndRunSchedulerPersistsSchedulesAndDeletes(t *tes
 	}
 	defer schedulerWorker.Close()
 
-	deleter := &testSQSMessageDeleter{}
-	err = insertPolledSQSMessageAndRunScheduler(ctx, schedulerWorker, deleter, PolledSQSMessage{
+	scheduleDecisions, err := insertPolledSQSMessageAndRunScheduler(ctx, schedulerWorker, PolledSQSMessage{
 		ExternalMessageID: "sqs-message-2",
 		ReceiptHandle:     "receipt-handle-2",
 		Body: `{
@@ -103,9 +93,14 @@ func TestInsertPolledSQSMessageAndRunSchedulerPersistsSchedulesAndDeletes(t *tes
 	if err != nil {
 		t.Fatalf("insert polled sqs message and run scheduler: %v", err)
 	}
-
-	if len(deleter.deletedReceiptHandles) != 1 || deleter.deletedReceiptHandles[0] != "receipt-handle-2" {
-		t.Fatalf("deletedReceiptHandles = %#v, want [receipt-handle-2]", deleter.deletedReceiptHandles)
+	if len(scheduleDecisions) != 1 {
+		t.Fatalf("len(scheduleDecisions) = %d, want 1", len(scheduleDecisions))
+	}
+	if !scheduleDecisions[0].ToSchedule {
+		t.Fatal("expected scheduler decision to schedule")
+	}
+	if scheduleDecisions[0].AccountNumber != "204772699175" {
+		t.Fatalf("AccountNumber = %q, want 204772699175", scheduleDecisions[0].AccountNumber)
 	}
 
 	totalAlarmRows, chainedAlarmRows, decidedAlarmRows := alarmMessageCounts(t, schedulerDatabasePath)
@@ -115,8 +110,8 @@ func TestInsertPolledSQSMessageAndRunSchedulerPersistsSchedulesAndDeletes(t *tes
 }
 
 // TestInsertPolledSQSMessageAndRunSchedulerRejectsUnsupportedBeforeDelete covers deterministic unsupported input.
-// It verifies main_testing leaves unsupported messages undeleted and does not force them through the scheduler's
-// database shape as though account metadata had been established.
+// It verifies unsupported messages fail before being forced through the scheduler's database shape as though account
+// metadata had been established, leaving main_testing with an error and no schedule decisions.
 func TestInsertPolledSQSMessageAndRunSchedulerRejectsUnsupportedBeforeDelete(t *testing.T) {
 	ctx := context.Background()
 	schedulerDatabasePath := createEmptyMainTestingSchedulerDatabase(t)
@@ -127,8 +122,7 @@ func TestInsertPolledSQSMessageAndRunSchedulerRejectsUnsupportedBeforeDelete(t *
 	}
 	defer schedulerWorker.Close()
 
-	deleter := &testSQSMessageDeleter{}
-	err = insertPolledSQSMessageAndRunScheduler(ctx, schedulerWorker, deleter, PolledSQSMessage{
+	scheduleDecisions, err := insertPolledSQSMessageAndRunScheduler(ctx, schedulerWorker, PolledSQSMessage{
 		ExternalMessageID: "sqs-message-unsupported",
 		ReceiptHandle:     "receipt-handle-unsupported",
 		Body:              `{"account":"204772699175","source":"not-cloudwatch"}`,
@@ -139,8 +133,8 @@ func TestInsertPolledSQSMessageAndRunSchedulerRejectsUnsupportedBeforeDelete(t *
 	if !strings.Contains(err.Error(), "unsupported sqs message type") {
 		t.Fatalf("error = %q, want unsupported message type", err)
 	}
-	if len(deleter.deletedReceiptHandles) != 0 {
-		t.Fatalf("unsupported message should not be deleted, got %#v", deleter.deletedReceiptHandles)
+	if len(scheduleDecisions) != 0 {
+		t.Fatalf("len(scheduleDecisions) = %d, want 0", len(scheduleDecisions))
 	}
 }
 
