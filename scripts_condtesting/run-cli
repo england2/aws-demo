@@ -1,0 +1,26 @@
+#!/usr/bin/env -S fish --no-config
+source (dirname (realpath (status filename)))/helpers.fish
+
+set -gx go_bin /home/t/.go/bin/go
+
+mkdir -p "$repo_root/debug-output"
+
+echo "[run-cli-script] setup: attempting to kill active conductor process pid to free port"
+set -l conductor_pid_file "$repo_root/debug-output/conductor.pid"
+if test -f "$conductor_pid_file"
+    set -l previous_conductor_pid (cat "$conductor_pid_file")
+    if test -n "$previous_conductor_pid"
+        kill "$previous_conductor_pid" 2>/dev/null
+    end
+end
+
+set -l server_pid (ss -tulpn 2>/dev/null | awk '/50055/ {match($0, /pid=([0-9]+)/, a); print a[1]}')
+if test -n "$server_pid"
+    kill "$server_pid" 2>/dev/null
+end
+
+# 1 ---------------------------
+sh -c 'cd "$repo_root/src/conductor/go-conductor" && "$go_bin" run . -addr localhost:50055 | tee "$repo_root/debug-output/conductor-output.txt"' &
+echo "[run-cli-script] conductor background PID: $last_pid"
+echo "$last_pid" > "$conductor_pid_file"
+echo "[run-cli-script] see $repo_root/debug-output/conductor-output.txt for conductor output"

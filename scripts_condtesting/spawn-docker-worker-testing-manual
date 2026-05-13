@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Starts an interactive test Docker worker with local conductor env vars.
+# This bypasses the worker image entrypoint so you can inspect the container and
+# run /usr/local/bin/worker manually.
+
+worker_image="${WORKER_IMAGE:-condtest-worker}"
+worker_id="${WORKER_ID:-manual-worker}"
+worker_container_name="condtest-worker-manual-${worker_id}"
+
+exec docker run \
+    --rm \
+    -it \
+    --network host \
+    --name "$worker_container_name" \
+    --workdir /worker/work \
+    --entrypoint /bin/bash \
+    -e CONDUCTOR_GRPC_SERVER_ADDR=localhost:50055 \
+    -e "WORKER_ID=$worker_id" \
+    -e RUN_DIR=/tmp/conductor-run \
+    "$worker_image"

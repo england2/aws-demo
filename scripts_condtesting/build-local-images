@@ -1,0 +1,14 @@
+#!/usr/bin/env fish
+source (dirname (realpath (status filename)))/helpers.fish
+
+docker build \
+  -f "$repo_root/src/conductor/Dockerfile" \
+  -t condtest-conductor \
+  "$repo_root" &
+
+docker build \
+  -f "$repo_root/src/worker/Dockerfile" \
+  -t condtest-worker \
+  "$repo_root"
+
+echo -e "Done building!\n"
