@@ -1,13 +1,14 @@
-name: agent-fargate
+name: worker
 
 on:
   push:
     branches:
       - main
     paths:
-      - "agent-conductor/agent-fargate/**"
-      - "agent-conductor/shared/agentproto/**"
-      - ".github/workflows/agent-fargate.yml"
+      - "conductor-and-worker/worker/**"
+      - "conductor-and-worker/proto/**"
+      - "conductor-and-worker/sharedlib/**"
+      - ".github/workflows/worker.yml"
   workflow_dispatch:
 
 permissions:
@@ -50,5 +51,5 @@ jobs:
             -t "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" \
             -t "$REGISTRY/$ECR_REPOSITORY:latest" \
             --push \
-            -f agent-conductor/agent-fargate/container/Dockerfile \
+            -f conductor-and-worker/worker/Dockerfile \
             .

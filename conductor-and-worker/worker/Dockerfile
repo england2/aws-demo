@@ -3,22 +3,19 @@
 # ==============================================================
 FROM golang:1.26-alpine AS build
 
-RUN apk add --no-cache fish protobuf protobuf-dev && \
-    go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
-    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
 
-COPY scripts/gen-proto /src/scripts/gen-proto
-COPY src/proto/ /src/src/proto/
-COPY src/sharedlib/ /src/src/sharedlib/
+WORKDIR /src/conductor-and-worker/worker/go-worker
 
-RUN /src/scripts/gen-proto
+COPY conductor-and-worker/proto/ /src/conductor-and-worker/proto/
+COPY conductor-and-worker/sharedlib/ /src/conductor-and-worker/sharedlib/
+COPY conductor-and-worker/worker/go-worker/go.mod conductor-and-worker/worker/go-worker/go.sum ./
+RUN go mod download
 
-WORKDIR /src/src/worker/go-worker
-
-COPY src/worker/go-worker/go.mod src/worker/go-worker/go.sum ./
-COPY src/worker/go-worker/ ./
-
-RUN CGO_ENABLED=0 GOOS=linux go build -o /out/worker .
+COPY conductor-and-worker/worker/go-worker/ ./
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/worker .
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/get-secrets ./cmd/get-secrets
 
 # ==============================================================
 # runtime stage
@@ -66,11 +63,13 @@ RUN mkdir -p /tmp/agent-meta /worker/work && \
     rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g @openai/codex@0.128.0
+# ai--done
 
 COPY --from=build /out/worker /usr/local/bin/worker
+COPY --from=build /out/get-secrets /usr/local/bin/get-secrets
 # Doesn't dropping in a `.codex` doesn't fix EOF sdk init error.
-# COPY src/worker/docker-resources/.codex/ /root/.codex/
-COPY src/worker/entrypoint.sh /entrypoint.sh
+# COPY conductor-and-worker/worker/docker-resources/.codex/ /root/.codex/
+COPY conductor-and-worker/worker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # real
