@@ -3,20 +3,12 @@
 # ==============================================================
 FROM golang:1.26-alpine AS build
 
-RUN apk add --no-cache fish protobuf protobuf-dev && \
-    go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
-    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+WORKDIR /src/conductor-and-worker/conductor/go-conductor
 
-COPY scripts/gen-proto /src/scripts/gen-proto
-COPY src/proto/ /src/src/proto/
-COPY src/sharedlib/ /src/src/sharedlib/
-
-RUN /src/scripts/gen-proto
-
-WORKDIR /src/src/conductor/go-conductor
-
-COPY src/conductor/go-conductor/go.mod src/conductor/go-conductor/go.sum ./
-COPY src/conductor/go-conductor/ ./
+COPY conductor-and-worker/proto/ /src/conductor-and-worker/proto/
+COPY conductor-and-worker/sharedlib/ /src/conductor-and-worker/sharedlib/
+COPY conductor-and-worker/conductor/go-conductor/go.mod conductor-and-worker/conductor/go-conductor/go.sum ./
+COPY conductor-and-worker/conductor/go-conductor/ ./
 
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/conductor .
 
@@ -26,13 +18,19 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /out/conductor .
 FROM debian:bookworm-slim
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends zip unzip && \
-    mkdir -p /conductor && \
+    apt-get install -y --no-install-recommends ca-certificates curl sqlite3 zip unzip && \
+    curl -sSf https://atlasgo.sh | sh && \
+    mkdir -p /conductor /usr/local/share/conductor && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /out/conductor /usr/local/bin/conductor
-COPY src/conductor/go-conductor/worker-resources/ /conductor/worker-resources/
+COPY conductor-and-worker/conductor/go-conductor/worker-resources/ /usr/local/share/conductor/worker-resources/
+COPY conductor-and-worker/conductor/go-conductor/db-sqlc/database.sql /usr/local/share/conductor/database.sql
+COPY conductor-and-worker/conductor/docker-entrypoint.sh /usr/local/bin/conductor-entrypoint
 
 WORKDIR /conductor
 
-ENTRYPOINT ["/usr/local/bin/conductor"]
+RUN chmod +x /usr/local/bin/conductor-entrypoint
+
+ENTRYPOINT ["/usr/local/bin/conductor-entrypoint"]
+CMD ["-addr=0.0.0.0:50055", "-test-db-loc=/conductor/data/scheduler.sqlite"]
