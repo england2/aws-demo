@@ -138,6 +138,34 @@ func TestInsertPolledSQSMessageAndRunSchedulerRejectsUnsupportedBeforeDelete(t *
 	}
 }
 
+// TestSchedulerDatabasePathFromFlagValuesSupportsPositionalFlagName verifies the local run command shape.
+// It covers `conductor -- test-db-loc /path/to/db.sqlite`, where Go flag parsing leaves the name and value as
+// positional args and the conductor must choose the second arg as the actual SQLite path.
+func TestSchedulerDatabasePathFromFlagValuesSupportsPositionalFlagName(t *testing.T) {
+	schedulerDatabasePath := schedulerDatabasePathFromFlagValues("", []string{
+		"test-db-loc",
+		"/tmp/test-database.sqlite",
+	})
+
+	if schedulerDatabasePath != "/tmp/test-database.sqlite" {
+		t.Fatalf("schedulerDatabasePath = %q, want /tmp/test-database.sqlite", schedulerDatabasePath)
+	}
+}
+
+// TestSchedulerDatabasePathFromFlagValuesPrefersParsedFlag keeps normal Go flag usage ahead of positional args.
+// It runs before any database compliance check, ensuring a parsed -test-db-loc value is not displaced by leftovers
+// after a "--" separator.
+func TestSchedulerDatabasePathFromFlagValuesPrefersParsedFlag(t *testing.T) {
+	schedulerDatabasePath := schedulerDatabasePathFromFlagValues("/tmp/from-flag.sqlite", []string{
+		"test-db-loc",
+		"/tmp/from-args.sqlite",
+	})
+
+	if schedulerDatabasePath != "/tmp/from-flag.sqlite" {
+		t.Fatalf("schedulerDatabasePath = %q, want /tmp/from-flag.sqlite", schedulerDatabasePath)
+	}
+}
+
 func createEmptyMainTestingSchedulerDatabase(t *testing.T) string {
 	t.Helper()
 

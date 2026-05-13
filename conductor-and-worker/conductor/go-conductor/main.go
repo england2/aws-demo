@@ -22,8 +22,9 @@ import (
 )
 
 var (
-	serverAddr = flag.String("addr", "localhost:50055", "The server address in the format of host:port")
-	dbLocation = flag.String("test-db-loc", "", "path to the test database file")
+	serverAddr       = flag.String("addr", "localhost:50055", "The server address in the format of host:port")
+	dbLocation       = flag.String("test-db-loc", "", "path to the test database file")
+	debugAlwaysNewDB = flag.Bool("debug_always_new_db", false, "create a fresh sibling scheduler database before polling")
 )
 
 type conductorServer struct {
@@ -228,6 +229,10 @@ func main_db_testing() {
 	}
 }
 
+// =============================================================
+// MAIN TESTING FUNCTIONS
+// =============================================================
+
 func main() {
 	main_testing()
 }
@@ -246,6 +251,17 @@ func main_testing() {
 	}
 
 	ctx := context.Background()
+
+	if *debugAlwaysNewDB {
+		createdDatabasePath, err := debugCreateNewDbAndSetLocation(ctx, schedulerDatabasePath)
+		if err != nil {
+			log.Fatalf("create debug scheduler database: %v", err)
+		}
+		schedulerDatabasePath = createdDatabasePath
+	} else if !checkIsDbCompliant(ctx, schedulerDatabasePath) {
+		fmt.Fprintf(os.Stderr, "database is not compliant: %s\n", schedulerDatabasePath)
+		return
+	}
 
 	schedulerWorker, err := scheduler.Open(ctx, scheduler.Config{
 		DBPath: schedulerDatabasePath,
