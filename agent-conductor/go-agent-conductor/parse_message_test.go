@@ -2,7 +2,9 @@ package main
 
 import "testing"
 
-// TestParseSQSMessageBodyCloudWatchAlarm verifies EventBridge alarm fields are normalized.
+// TestParseSQSMessageBodyCloudWatchAlarm verifies EventBridge alarm fields are normalized from a raw SQS body string.
+// It exercises the parser that can run after parseSQSMessage preserves Body, before any caller chooses how to
+// include parsed CloudWatch details in prompts or logs.
 func TestParseSQSMessageBodyCloudWatchAlarm(t *testing.T) {
 	body := []byte(`{
 		"id": "event-1",
@@ -42,8 +44,9 @@ func TestParseSQSMessageBodyCloudWatchAlarm(t *testing.T) {
 	}
 }
 
-// TestParseSQSMessageBodyUnknownForInvalidJSON ensures malformed JSON is not fatal here.
-// The parser classifies it as unknown and leaves quarantine/ignore policy to callers.
+// TestParseSQSMessageBodyUnknownForInvalidJSON ensures malformed JSON does not break the SQS handling pipeline.
+// It covers the parser branch that returns MessageTypeUnknown, leaving callers free to continue raw-body prompt
+// handling without a hard parse dependency.
 func TestParseSQSMessageBodyUnknownForInvalidJSON(t *testing.T) {
 	parsed := ParseSQSMessageBody([]byte(`not-json`))
 

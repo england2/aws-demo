@@ -43,9 +43,9 @@ type eventBridgeCloudWatchAlarmBody struct {
 	} `json:"detail"`
 }
 
-// ParseSQSMessageBody classifies raw SQS JSON into known conductor message types.
-// Invalid JSON and unsupported event shapes become MessageTypeUnknown rather than
-// hard failures because message handling/quarantine policy lives outside the parser.
+// ParseSQSMessageBody classifies a raw SQS JSON body into the small normalized shape used by callers.
+// It can run after parseSQSMessage has preserved Body bytes, and it intentionally returns MessageTypeUnknown
+// instead of blocking the SQS-to-Fargate dataflow on malformed or unsupported payloads.
 func ParseSQSMessageBody(body []byte) ParsedSQSMessage {
 	parsed := ParsedSQSMessage{
 		MessageType: MessageTypeUnknown,
@@ -83,7 +83,9 @@ func ParseSQSMessageBody(body []byte) ParsedSQSMessage {
 	return parsed
 }
 
-// stringPtrIfNotEmpty converts present parsed JSON strings into optional fields.
+// stringPtrIfNotEmpty normalizes parsed JSON strings into optional values for ParsedSQSMessage.
+// ParseSQSMessageBody calls it only after JSON unmarshalling succeeds, so empty EventBridge fields do not look
+// like meaningful alarm metadata to downstream prompt or logging code.
 func stringPtrIfNotEmpty(value string) *string {
 	if value == "" {
 		return nil

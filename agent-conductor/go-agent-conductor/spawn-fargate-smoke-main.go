@@ -11,18 +11,16 @@ import (
 	"agent-orchestrator/fargate"
 )
 
-// This file uses go tags to produce a binary that calls the agent spawner function directly for manual testing.
-// Build and run with:
-//   cd agent-conductor/go-agent-conductor
-//   go build -tags spawnfargate -o /tmp/spawnfargate-smoke && /tmp/spawnfargate-smoke
-
+// main is the build-tagged smoke entrypoint for spawning one task without the SQS poller.
+// It fabricates the same minimal PolledSQSMessage fields that HandleSQSMessage uses, then sends the derived prompt
+// and static adhoc config directly into fargate.Spawn.
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	message := SQSMessage{
+	message := PolledSQSMessage{
 		ExternalMessageID: getenvDefault("SMOKE_MESSAGE_ID", "spawnfargate-smoke"),
-		RawBody:           getenvDefault("SMOKE_RAW_ALERT", "spawnfargate smoke test"),
+		Body:              getenvDefault("SMOKE_RAW_ALERT", "spawnfargate smoke test"),
 	}
 
 	fmt.Printf("spawnfargate smoke: spawning agentName=%s\n", defaultAgentName)

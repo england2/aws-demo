@@ -8,8 +8,9 @@ import (
 	"os"
 )
 
-// main is the conductor entrypoint running on the debian-agent-operation EC2 host.
-// It processes inbound SQS messages by spawning one Fargate worker per delivery.
+// main wires the conductor runtime from SQS polling into one Fargate spawn per received delivery.
+// It creates the poller before starting the receive loop, then passes each parsed message to HandleSQSMessage
+// so deletion remains ordered after a successful ECS RunTask call.
 func main() {
 	fmt.Println("Agent Conductor started!")
 

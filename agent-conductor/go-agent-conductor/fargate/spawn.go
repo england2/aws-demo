@@ -36,18 +36,28 @@ type SpawnResult struct {
 }
 
 type ecsClient interface {
+	// RunTask is the only ECS operation this package needs for the no-state spawn path.
+	// Spawn calls it after BuildRunTaskInput and AWS client construction have completed, and the returned task
+	// list becomes the sole source for SpawnResult.TaskARN.
 	RunTask(ctx context.Context, params *ecs.RunTaskInput, optFns ...func(*ecs.Options)) (*ecs.RunTaskOutput, error)
 }
 
+// loadAWSConfig is the replaceable AWS config loader used immediately before ECS client creation.
+// Production code uses the SDK default chain for the request region, while tests install a deterministic hook
+// before calling Spawn so no external AWS lookup occurs.
 var loadAWSConfig = func(ctx context.Context, region string) (aws.Config, error) {
 	return config.LoadDefaultConfig(ctx, config.WithRegion(region))
 }
 
+// newECSClient is the replaceable constructor that converts loaded AWS config into the RunTask client.
+// Spawn calls it after loadAWSConfig succeeds, and tests replace it so RunTask input and output stay in memory.
 var newECSClient = func(awsConfig aws.Config) ecsClient {
 	return ecs.NewFromConfig(awsConfig)
 }
 
-// Spawn starts exactly one ECS Fargate task.
+// Spawn is the package boundary that turns a validated SpawnRequest into one ECS RunTask call.
+// Callers must establish config and environment first; Spawn builds the ECS input, loads AWS config for the
+// request region, and returns only the task ARN needed by the conductor log/delete path.
 func Spawn(ctx context.Context, request SpawnRequest) (SpawnResult, error) {
 	input, err := BuildRunTaskInput(request)
 	if err != nil {
@@ -78,7 +88,9 @@ func Spawn(ctx context.Context, request SpawnRequest) (SpawnResult, error) {
 	return SpawnResult{TaskARN: taskARN}, nil
 }
 
-// BuildRunTaskInput converts a spawn request into the ECS API request.
+// BuildRunTaskInput converts static ECS config plus container env into the exact RunTask payload.
+// Spawn calls it before AWS credentials are loaded, and tests call it directly to lock request shape without
+// reaching ECS.
 func BuildRunTaskInput(request SpawnRequest) (*ecs.RunTaskInput, error) {
 	if err := validateSpawnRequest(request); err != nil {
 		return nil, err
@@ -127,7 +139,9 @@ func BuildRunTaskInput(request SpawnRequest) (*ecs.RunTaskInput, error) {
 	}, nil
 }
 
-// WithDebugSSHEnvironment adds optional debug SSH settings from conductor env vars.
+// WithDebugSSHEnvironment copies the caller's container env and appends debug SSH settings when enabled.
+// HandleSQSMessage and the smoke entrypoint call it after AGENT_NAME and AGENT_PROMPT are established, so the
+// final map can flow unchanged into BuildRunTaskInput.
 func WithDebugSSHEnvironment(environment map[string]string) map[string]string {
 	next := make(map[string]string, len(environment)+2)
 	for key, value := range environment {
@@ -147,6 +161,9 @@ func WithDebugSSHEnvironment(environment map[string]string) map[string]string {
 	return next
 }
 
+// validateSpawnRequest fails before ECS input construction when required infrastructure or runtime env is absent.
+// BuildRunTaskInput calls it first so missing queue-derived prompt data or adhoc cluster config cannot reach
+// fargate.Spawn's AWS RunTask call.
 func validateSpawnRequest(request SpawnRequest) error {
 	required := map[string]string{
 		"Region":         request.Config.Region,
@@ -177,11 +194,17 @@ func validateSpawnRequest(request SpawnRequest) error {
 	return nil
 }
 
+// truthyEnv centralizes shell-friendly parsing for feature flags used during spawn request assembly.
+// WithDebugSSHEnvironment calls it before adding debug env vars, keeping normal worker spawns free of optional
+// SSH settings unless the conductor process opted in.
 func truthyEnv(name string) bool {
 	value := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
 	return value == "1" || value == "true" || value == "yes" || value == "on"
 }
 
+// formatECSFailures compresses ECS RunTask failure records into one operator-readable error string.
+// Spawn calls it after RunTask returns API-level failures, so main and smoke callers receive actionable context
+// without needing to inspect AWS SDK structs.
 func formatECSFailures(failures []ecstypes.Failure) string {
 	parts := make([]string, 0, len(failures))
 	for _, failure := range failures {
