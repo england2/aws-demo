@@ -38,6 +38,16 @@ output "ecr_registry_id" {
   value       = aws_ecr_repository.cpu_spin.registry_id
 }
 
+output "conductor_ecr_repository_name" {
+  description = "Name of the ECR repository for the conductor image."
+  value       = aws_ecr_repository.conductor.name
+}
+
+output "conductor_ecr_repository_url" {
+  description = "Repository URL for pushing and pulling the conductor image."
+  value       = aws_ecr_repository.conductor.repository_url
+}
+
 output "agent_fargate_ecr_repository_name" {
   description = "Name of the ECR repository for the agent Fargate image."
   value       = aws_ecr_repository.agent_fargate.name

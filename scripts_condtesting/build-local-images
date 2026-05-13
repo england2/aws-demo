@@ -2,13 +2,16 @@
 source (dirname (realpath (status filename)))/helpers.fish
 
 docker build \
-  -f "$repo_root/src/conductor/Dockerfile" \
-  -t condtest-conductor \
-  "$repo_root" &
-
-docker build \
-  -f "$repo_root/src/worker/Dockerfile" \
+  -f "$repo_root/conductor-and-worker/worker/Dockerfile" \
   -t condtest-worker \
   "$repo_root"
+  # &
 
-echo -e "Done building!\n"
+echo -e "Done building worker!\n\n"
+
+docker build \
+    -f "$repo_root/conductor-and-worker/conductor/Dockerfile" \
+  -t condtest-conductor \
+  "$repo_root"
+
+echo -e "Done building conductor!\n\n"

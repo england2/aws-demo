@@ -1,0 +1,129 @@
+name: conductor
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "conductor-and-worker/conductor/**"
+      - "conductor-and-worker/proto/**"
+      - "conductor-and-worker/sharedlib/**"
+      - "infra/ad-hoc/debian-agent-operation/inside/**"
+      - ".github/workflows/conductor.yml"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-push-and-deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: us-west-2
+      ECR_REPOSITORY: conductor
+      DEPLOY_TARGET_TAG: debian-agent-operation
+      ARTIFACT_BUCKET: aws-demo-agent-operation-artifacts-204772699175-us-west-2
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: arn:aws:iam::204772699175:role/github-actions-ecr-push
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push conductor image
+        id: image
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          IMAGE_URI="$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          LATEST_IMAGE_URI="$REGISTRY/$ECR_REPOSITORY:latest"
+
+          docker build \
+            -t "$IMAGE_URI" \
+            -f conductor-and-worker/conductor/Dockerfile \
+            .
+
+          docker push "$IMAGE_URI"
+
+          docker tag "$IMAGE_URI" "$LATEST_IMAGE_URI"
+          docker push "$LATEST_IMAGE_URI"
+
+          echo "image_uri=$LATEST_IMAGE_URI" >> "$GITHUB_OUTPUT"
+          echo "sha_image_uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
+
+      - name: Look up debian-agent-operation instance ID
+        id: instance
+        run: |
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --region "$AWS_REGION" \
+            --filters "Name=tag:Name,Values=$DEPLOY_TARGET_TAG" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[0].Instances[0].InstanceId' \
+            --output text)
+
+          if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "None" ]; then
+            echo "Could not find running instance with Name tag $DEPLOY_TARGET_TAG"
+            exit 1
+          fi
+
+          echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy conductor on debian-agent-operation with SSM
+        id: deploy
+        run: |
+          cat > /tmp/conductor-ssm-parameters.json <<'EOF'
+          {
+            "commands": [
+              "set -euo pipefail",
+              "TMP_DIR=/tmp/conductor-deploy-${{ github.sha }}",
+              "rm -rf \"$TMP_DIR\"",
+              "mkdir -p \"$TMP_DIR\"",
+              "aws s3 cp \"${{ steps.deploy_scripts.outputs.artifact_uri }}\" \"$TMP_DIR/scripts.tar.gz\"",
+              "tar -xzf \"$TMP_DIR/scripts.tar.gz\" -C \"$TMP_DIR\"",
+              "sudo install -m 0755 \"$TMP_DIR/deploy-conductor.sh\" /home/admin/deploy-conductor.sh",
+              "sudo install -m 0755 \"$TMP_DIR/install-conductor-host.sh\" /home/admin/install-conductor-host.sh",
+              "sudo install -m 0755 \"$TMP_DIR/install-docker.sh\" /home/admin/install-docker.sh",
+              "sudo install -m 0755 \"$TMP_DIR/restart-conductor.sh\" /home/admin/restart-conductor.sh",
+              "sudo install -m 0644 \"$TMP_DIR/docker-compose.conductor.yml\" /home/admin/docker-compose.conductor.yml",
+              "bash /home/admin/install-conductor-host.sh",
+              "bash /home/admin/deploy-conductor.sh \"${{ steps.image.outputs.image_uri }}\"",
+              "rm -rf \"$TMP_DIR\""
+            ]
+          }
+          EOF
+
+          COMMAND_ID=$(aws ssm send-command \
+            --region "$AWS_REGION" \
+            --instance-ids "${{ steps.instance.outputs.instance_id }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Deploy conductor image ${{ github.sha }}" \
+            --parameters file:///tmp/conductor-ssm-parameters.json \
+            --query 'Command.CommandId' \
+            --output text)
+
+          echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for SSM command completion
+        run: |
+          aws ssm wait command-executed \
+            --region "$AWS_REGION" \
+            --command-id "${{ steps.deploy.outputs.command_id }}" \
+            --instance-id "${{ steps.instance.outputs.instance_id }}"
+
+      - name: Show SSM command result
+        if: ${{ always() && steps.deploy.outputs.command_id != '' }}
+        run: |
+          aws ssm get-command-invocation \
+            --region "$AWS_REGION" \
+            --command-id "${{ steps.deploy.outputs.command_id }}" \
+            --instance-id "${{ steps.instance.outputs.instance_id }}"

@@ -47,14 +47,17 @@ data "aws_iam_policy_document" "ecr_pull" {
   }
 
   statement {
-    sid    = "ECRPullCpuSpin"
+    sid    = "ECRPullDeployImages"
     effect = "Allow"
     actions = [
       "ecr:BatchCheckLayerAvailability",
       "ecr:BatchGetImage",
       "ecr:GetDownloadUrlForLayer",
     ]
-    resources = [aws_ecr_repository.cpu_spin.arn]
+    resources = [
+      aws_ecr_repository.cpu_spin.arn,
+      aws_ecr_repository.conductor.arn,
+    ]
   }
 }
 

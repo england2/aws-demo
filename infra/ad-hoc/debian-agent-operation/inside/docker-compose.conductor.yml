@@ -1,0 +1,14 @@
+services:
+  conductor:
+    image: ${CONDUCTOR_IMAGE}
+    container_name: conductor
+    restart: "no"
+    ports:
+      - "50055:50055"
+    volumes:
+      - /conductor:/conductor
+    environment:
+      AWS_REGION: us-west-2
+      AGENT_OPERATION_QUEUE_URL: https://sqs.us-west-2.amazonaws.com/204772699175/agent-operation-events
+      DEBUG_SSH_ENABLED: "1"
+      DEBUG_SSH_PUBLIC_KEY_SECRET_NAME: debug_public_ssh_key
