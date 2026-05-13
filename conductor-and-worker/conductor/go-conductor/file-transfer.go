@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	// full dir ends up being /tmp/conductor-run/filetransfer
+	// full dir ends up being /conductor/run/filetransfer
 	fileTransferDirName     = "filetransfer"
 	ticketWorkerResourceDir = "worker-resources/ticket-worker"
 )

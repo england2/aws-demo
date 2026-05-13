@@ -28,6 +28,10 @@ var (
 )
 
 type conductorServer struct {
+	// The conductor's gRPC server invokes our server-side RPC methods without giving us a
+	// convenient client identity. Each worker request carries worker_id in the protobuf payload,
+	// and the registry maps that ID to the conductor's in-memory worker representation (that is, an
+	// instance the `spawnedWorker` struct).
 	sharedproto.UnimplementedWorkerEventReceiverServiceServer
 	registry *workerRegistry
 }
@@ -127,7 +131,11 @@ func (s *conductorServer) WorkerSendsCodexError(ctx context.Context, msg *shared
 
 // This file (`false` by default) will be flipped by a simple CI step.
 // After this file is flipped, the Conductor will not schedule any more agent jobs, and will wait for current jobs to finish.
-const conductorShuttingDown = "IS_CONDUCTOR_SHUTTING_DOWN"
+const (
+	conductorShuttingDown = "IS_CONDUCTOR_SHUTTING_DOWN"
+	conductorRootPath     = "/conductor"
+	conductorRunDirName   = "run"
+)
 
 var isGlobalShutdownOkay bool
 
@@ -135,7 +143,7 @@ func main_real() {
 	flag.Parse()
 
 	// build runtime and shutdown files
-	runDir := filepath.Join(os.TempDir(), "conductor-run")
+	runDir := filepath.Join(conductorRootPath, conductorRunDirName)
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		log.Fatalf("create run dir: %v", err)
 	}
@@ -241,6 +249,23 @@ func main() {
 // It starts after flags provide the scheduler DB path, then each polled SQS message is inserted, scheduled,
 // printed, and deleted from SQS only after the scheduler accepts it.
 func main_testing() {
+	// =============================================================
+	// Runtime path, Files, and Args
+	// =============================================================
+
+	// build runtime and shutdown files
+	runDir := filepath.Join(conductorRootPath, conductorRunDirName)
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		log.Fatalf("create run dir: %v", err)
+	}
+	shutdownOkayPath := filepath.Join(runDir, conductorShuttingDown)
+	if err := os.Remove(shutdownOkayPath); err != nil && !os.IsNotExist(err) {
+		log.Fatalf("remove old shutdown file: %v", err)
+	}
+	if err := os.WriteFile(shutdownOkayPath, []byte("false\n"), 0o644); err != nil {
+		log.Fatalf("initialize shutdown file: %v", err)
+	}
+
 	fmt.Printf("in main_testing\n\n")
 
 	flag.Parse()
@@ -254,6 +279,8 @@ func main_testing() {
 		log.Fatal("test-db-loc is required")
 	}
 
+	// ai-- this needs to be named dbContext!
+	// ai-- ensure the other ctx in this function are unique! reference main_real to see real setup.
 	ctx := context.Background()
 
 	if *debugAlwaysNewDB {
@@ -281,6 +308,32 @@ func main_testing() {
 	}
 
 	// =============================================================
+	// gRPC server setup
+	// =============================================================
+
+	fmt.Printf("conductor listening address: %s\n", *serverAddr)
+	fmt.Printf("conductor run directory: %s\n", runDir)
+
+	listener, err := net.Listen("tcp", *serverAddr)
+	if err != nil {
+		log.Fatalf("listen: %v", err)
+	}
+
+	registry := newWorkerRegistry()
+	conductorServiceImplementation := &conductorServer{
+		registry: registry,
+	}
+
+	grpcServer := grpc.NewServer()
+	sharedproto.RegisterWorkerEventReceiverServiceServer(grpcServer, conductorServiceImplementation)
+
+	go func() {
+		if err := grpcServer.Serve(listener); err != nil {
+			log.Fatalf("serve: %v", err)
+		}
+	}()
+
+	// =============================================================
 	// Poll loop
 	// =============================================================
 
@@ -288,30 +341,74 @@ func main_testing() {
 
 	fmt.Printf("polling SQS queue with scheduler DB %s\n", schedulerDatabasePath)
 
-	for {
-		select {
-		case polledSQSMessage, ok := <-messages:
-			if !ok {
-				return
+	// ai-- will running this in a goroutine have strange side effects? will the shutdown gate be the main program blocker?
+	go func() {
+		for {
+			select {
+			case polledSQSMessage, ok := <-messages:
+				if !ok {
+					return
+				}
+				fmt.Println("[Conductor] got sqs message!")
+				scheduleDecisions, err := insertPolledSQSMessageAndRunScheduler(ctx, schedulerWorker, polledSQSMessage)
+				if err == nil {
+					err = sqsPoller.DeleteMessage(ctx, polledSQSMessage.ReceiptHandle)
+				}
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "handle sqs message %q: %v\n", polledSQSMessage.ExternalMessageID, err)
+					continue
+				}
+				if err := printSchedulerDecisions(scheduleDecisions); err != nil {
+					fmt.Fprintf(os.Stderr, "print scheduler decisions for sqs message %q: %v\n", polledSQSMessage.ExternalMessageID, err)
+				}
+			case err, ok := <-pollErrors:
+				if !ok {
+					pollErrors = nil
+					continue
+				}
+				fmt.Fprintf(os.Stderr, "poll sqs: %v\n", err)
 			}
-			fmt.Println("[Conductor] got sqs message!")
-			scheduleDecisions, err := insertPolledSQSMessageAndRunScheduler(ctx, schedulerWorker, polledSQSMessage)
-			if err == nil {
-				err = sqsPoller.DeleteMessage(ctx, polledSQSMessage.ReceiptHandle)
-			}
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "handle sqs message %q: %v\n", polledSQSMessage.ExternalMessageID, err)
-				continue
-			}
-			if err := printSchedulerDecisions(scheduleDecisions); err != nil {
-				fmt.Fprintf(os.Stderr, "print scheduler decisions for sqs message %q: %v\n", polledSQSMessage.ExternalMessageID, err)
-			}
-		case err, ok := <-pollErrors:
-			if !ok {
-				pollErrors = nil
-				continue
-			}
-			fmt.Fprintf(os.Stderr, "poll sqs: %v\n", err)
 		}
+
+		fmt.Println("Polling loop ended")
+
+	}()
+
+	// ============================================================
+	// Safe Shutdown Gate
+	// ============================================================
+
+	var numActiveWorkers int
+	for {
+		time.Sleep(5 * time.Second)
+
+		shutdownOkayBytes, err := os.ReadFile(shutdownOkayPath)
+		if err != nil {
+			log.Fatalf("read shutdown file: %v", err)
+		}
+
+		isShutdownOkay, err := strconv.ParseBool(strings.TrimSpace(string(shutdownOkayBytes)))
+		if err != nil {
+			log.Fatalf("parse shutdown file: %v", err)
+		}
+
+		if isShutdownOkay {
+			numActiveWorkers = registry.getNumActiveWorkers()
+			fmt.Printf("SHUTDOWN_OKAY is true, waiting for %d workers to finish", numActiveWorkers)
+		} else {
+			continue
+		}
+
+		if isShutdownOkay && numActiveWorkers == 0 {
+			break
+		}
+
+	}
+
+	// Writes `CONDUCTOR_READY_FOR_SAFE_SHUTDOWN`, which the CI waits to exit
+	// Also ensure that the CI deployment waiter also waits on `pgrep -f '^/usr/local/bin/go-conductor$'` to have a non-zero exit code.
+	safeShutdownSucceededPath := filepath.Join(runDir, "CONDUCTOR_READY_FOR_SAFE_SHUTDOWN")
+	if err := os.WriteFile(safeShutdownSucceededPath, []byte("true\n"), 0o644); err != nil {
+		log.Fatalf("write safe shutdown succeeded file: %v", err)
 	}
 }

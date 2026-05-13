@@ -27,11 +27,12 @@ FROM debian:bookworm-slim
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends zip unzip && \
+    mkdir -p /conductor && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /out/conductor /usr/local/bin/conductor
-COPY src/conductor/go-conductor/worker-resources/ /usr/local/bin/worker-resources/
+COPY src/conductor/go-conductor/worker-resources/ /conductor/worker-resources/
 
-WORKDIR /usr/local/bin
+WORKDIR /conductor
 
 ENTRYPOINT ["/usr/local/bin/conductor"]
