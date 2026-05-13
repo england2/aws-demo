@@ -45,7 +45,6 @@ type conductorServer struct {
 // worker that sent it.
 //
 
-
 func (s *conductorServer) WorkerStartsTest(ctx context.Context, msg *sharedproto.Test) (*sharedproto.TestResponse, error) {
 	workerID, err := workerIDFromIdentity(msg.GetWorker())
 	if err != nil {
@@ -289,8 +288,7 @@ func main_testing() {
 		}
 		schedulerDatabasePath = createdDatabasePath
 	} else if !checkIsDbCompliant(dbContext, schedulerDatabasePath) {
-		fmt.Fprintf(os.Stderr, "database is not compliant: %s\n", schedulerDatabasePath)
-		return
+		log.Fatalf("database is not compliant: %s", schedulerDatabasePath)
 	}
 
 	schedulerWorker, err := scheduler.Open(dbContext, scheduler.Config{
@@ -345,7 +343,6 @@ func main_testing() {
 
 	chanPollDone := make(chan struct{})
 
-	// ai--done
 	go func(pollLoopContext context.Context, chanPollDone <-chan struct{}) {
 		defer fmt.Println("Polling loop ended")
 

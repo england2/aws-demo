@@ -8,7 +8,7 @@ import (
 )
 
 func execWorkerProcessTestingDocker(config workerSpawnConfig) (*exec.Cmd, error) {
-	spawnDockerWorkerScriptPath, err := filepath.Abs("../../../scripts/spawn-docker-worker-testing")
+	spawnDockerWorkerScriptPath, err := filepath.Abs("/home/t/spawn-docker-worker-testing")
 	if err != nil {
 		return nil, fmt.Errorf("resolve docker worker spawn script path: %w", err)
 	}
