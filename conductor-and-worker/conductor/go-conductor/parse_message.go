@@ -14,6 +14,7 @@ const (
 // Callers can use these deterministic fields when building prompts or logs.
 type ParsedSQSMessage struct {
 	ExternalEventID     *string
+	AccountNumber       *string
 	MessageType         string
 	CloudWatchAlarmName *string
 	CloudWatchState     *string
@@ -25,6 +26,7 @@ type ParsedSQSMessage struct {
 // It intentionally includes only fields needed for classification and chain decisions.
 type eventBridgeCloudWatchAlarmBody struct {
 	ID         string `json:"id"`
+	Account    string `json:"account"`
 	DetailType string `json:"detail-type"`
 	Source     string `json:"source"`
 	Time       string `json:"time"`
@@ -44,8 +46,8 @@ type eventBridgeCloudWatchAlarmBody struct {
 }
 
 // ParseSQSMessageBody classifies a raw SQS JSON body into the small normalized shape used by callers.
-// It can run after parseSQSMessage has preserved Body bytes, and it intentionally returns MessageTypeUnknown
-// instead of blocking the SQS-to-Fargate dataflow on malformed or unsupported payloads.
+// It can run after parseSQSMessage has preserved Body, and it intentionally returns MessageTypeUnknown
+// for malformed or unsupported payloads so the caller can decide whether to retry, delete, or log the delivery.
 func ParseSQSMessageBody(body []byte) ParsedSQSMessage {
 	parsed := ParsedSQSMessage{
 		MessageType: MessageTypeUnknown,
@@ -57,6 +59,7 @@ func ParseSQSMessageBody(body []byte) ParsedSQSMessage {
 	}
 
 	parsed.ExternalEventID = stringPtrIfNotEmpty(event.ID)
+	parsed.AccountNumber = stringPtrIfNotEmpty(event.Account)
 
 	if event.Source != "aws.cloudwatch" || event.DetailType != "CloudWatch Alarm State Change" {
 		return parsed

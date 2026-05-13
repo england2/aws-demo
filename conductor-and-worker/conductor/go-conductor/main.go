@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -22,8 +21,10 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-var serverAddr = flag.String("addr", "localhost:50055", "The server address in the format of host:port")
-var dbLocation = flag.String("test-db-loc", "", "path to the test database file")
+var (
+	serverAddr = flag.String("addr", "localhost:50055", "The server address in the format of host:port")
+	dbLocation = flag.String("test-db-loc", "", "path to the test database file")
+)
 
 type conductorServer struct {
 	sharedproto.UnimplementedWorkerEventReceiverServiceServer
@@ -129,28 +130,6 @@ const conductorShuttingDown = "IS_CONDUCTOR_SHUTTING_DOWN"
 
 var isGlobalShutdownOkay bool
 
-func dbtestingmain() {
-	flag.Parse()
-
-	// ============================================================
-	// Before new message
-	// ============================================================
-
-	decisions, err := scheduler.Run(context.Background(), scheduler.Config{
-		DBPath: *dbLocation,
-	})
-	if err != nil {
-		panic(err)
-	}
-
-	encoded, err := json.MarshalIndent(decisions, "", "  ")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	fmt.Println(string(encoded))
-}
-
 func main_real() {
 	flag.Parse()
 
@@ -239,11 +218,65 @@ func main_real() {
 	}
 }
 
+// temporary reference function showing how to use the scheduler package
+func main_db_testing() {
+	flag.Parse()
+
+	// Showing decisions before a new message is added.
+	if err := runSchedulerAndPrintDecisions(context.Background(), testSchedulerDatabasePathFromFlags()); err != nil {
+		panic(err)
+	}
+}
+
 func main() {
 	main_testing()
 }
 
+// main_testing wires the local smoke-test conductor path: DB-backed scheduler plus live SQS polling.
+// It starts after flags provide the scheduler DB path, then each polled SQS message is inserted, scheduled,
+// printed, and deleted from SQS only after the scheduler accepts it.
 func main_testing() {
-	fmt.Println("CALLING DBTESTING MAIN")
-	dbtestingmain()
+	flag.Parse()
+
+	schedulerDatabasePath := testSchedulerDatabasePathFromFlags()
+	if schedulerDatabasePath == "" {
+		log.Fatal("test-db-loc is required")
+	}
+
+	ctx := context.Background()
+
+	schedulerWorker, err := scheduler.Open(ctx, scheduler.Config{
+		DBPath: schedulerDatabasePath,
+	})
+	if err != nil {
+		log.Fatalf("open scheduler: %v", err)
+	}
+	defer schedulerWorker.Close()
+
+	sqsPoller, err := NewTicketCloudWatchSQSPoller(ctx)
+	if err != nil {
+		log.Fatalf("create sqs poller: %v", err)
+	}
+
+	messages, pollErrors := sqsPoller.Start(ctx)
+	fmt.Printf("polling SQS queue with scheduler DB %s\n", schedulerDatabasePath)
+
+	for {
+		select {
+		case polledSQSMessage, ok := <-messages:
+			if !ok {
+				return
+			}
+			// ai q Quick: is it possible that this function could be defined as a receiver on the workerer, or does the data separation between packages make that difficult.
+			if err := insertPolledSQSMessageAndRunScheduler(ctx, schedulerWorker, sqsPoller, polledSQSMessage); err != nil {
+				fmt.Fprintf(os.Stderr, "handle sqs message %q: %v\n", polledSQSMessage.ExternalMessageID, err)
+			}
+		case err, ok := <-pollErrors:
+			if !ok {
+				pollErrors = nil
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "poll sqs: %v\n", err)
+		}
+	}
 }

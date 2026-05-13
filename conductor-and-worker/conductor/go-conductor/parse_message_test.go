@@ -8,6 +8,7 @@ import "testing"
 func TestParseSQSMessageBodyCloudWatchAlarm(t *testing.T) {
 	body := []byte(`{
 		"id": "event-1",
+		"account": "204772699175",
 		"detail-type": "CloudWatch Alarm State Change",
 		"source": "aws.cloudwatch",
 		"time": "2026-05-01T04:15:44Z",
@@ -29,6 +30,9 @@ func TestParseSQSMessageBodyCloudWatchAlarm(t *testing.T) {
 	}
 	if parsed.ExternalEventID == nil || *parsed.ExternalEventID != "event-1" {
 		t.Fatalf("ExternalEventID = %v, want event-1", parsed.ExternalEventID)
+	}
+	if parsed.AccountNumber == nil || *parsed.AccountNumber != "204772699175" {
+		t.Fatalf("AccountNumber = %v, want 204772699175", parsed.AccountNumber)
 	}
 	if parsed.CloudWatchAlarmName == nil || *parsed.CloudWatchAlarmName != "debian-cpu-spin-high-cpu" {
 		t.Fatalf("CloudWatchAlarmName = %v", parsed.CloudWatchAlarmName)

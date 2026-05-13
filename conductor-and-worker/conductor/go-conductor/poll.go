@@ -42,7 +42,7 @@ type PolledSQSMessage struct {
 
 // Start launches the long-poll loop for a configured SQSPoller and exposes message/error channels to main.
 // The poller must already have its AWS client and queue URL from NewSQSPoller; messages emitted here are later
-// handed to HandleSQSMessage, which owns spawn and delete ordering.
+// handed to main_testing, which owns scheduler insertion and delete ordering.
 func (p *SQSPoller) Start(ctx context.Context) (<-chan PolledSQSMessage, <-chan error) {
 	messages := make(chan PolledSQSMessage)
 	errors := make(chan error)
@@ -72,7 +72,7 @@ func NewTicketCloudWatchSQSPoller(ctx context.Context) (*SQSPoller, error) {
 
 // Poll continuously receives SQS messages, converts AWS transport values into PolledSQSMessage, and sends them onward.
 // It runs after Start has created the channels, uses ReceiveMessages for each AWS call, and never deletes messages;
-// deletion happens later in HandleSQSMessage after Fargate spawn succeeds.
+// deletion happens later after the scheduler accepts a supported message.
 func (p *SQSPoller) Poll(ctx context.Context, messages chan<- PolledSQSMessage, errors chan<- error) {
 	for {
 		select {
@@ -155,7 +155,7 @@ func (p *SQSPoller) ReceiveMessages(ctx context.Context) ([]types.Message, error
 }
 
 // DeleteMessage removes one SQS delivery from the same queue this poller receives from.
-// HandleSQSMessage calls it only after fargate.Spawn succeeds, using the receipt handle that parseSQSMessage
+// main_testing calls it only after scheduler insertion succeeds, using the receipt handle that parseSQSMessage
 // preserved from the current delivery.
 func (p *SQSPoller) DeleteMessage(ctx context.Context, receiptHandle string) error {
 	if receiptHandle == "" {
@@ -174,8 +174,8 @@ func (p *SQSPoller) DeleteMessage(ctx context.Context, receiptHandle string) err
 }
 
 // parseSQSMessage converts one AWS SDK message into the conductor's minimal PolledSQSMessage transport model.
-// Poll calls it after ReceiveMessages and before sending work to main, preserving Body for prompt construction
-// and ReceiptHandle for the later successful-spawn delete step.
+// Poll calls it after ReceiveMessages and before sending work to main, preserving Body for scheduler RawBody
+// and ReceiptHandle for the later successful-handling delete step.
 func parseSQSMessage(message types.Message) (PolledSQSMessage, error) {
 	if message.Body == nil {
 		return PolledSQSMessage{}, fmt.Errorf("sqs message %s has empty body", aws.ToString(message.MessageId))
@@ -189,7 +189,7 @@ func parseSQSMessage(message types.Message) (PolledSQSMessage, error) {
 }
 
 // getenvDefault reads a string env override while preserving a hard-coded default for local and systemd runs.
-// Queue setup and smoke-test prompt construction call it before creating AWS clients or spawn requests.
+// Queue setup calls it before creating AWS clients so local and deployed pollers use the same config path.
 func getenvDefault(name string, fallback string) string {
 	value := os.Getenv(name)
 	if value == "" {
