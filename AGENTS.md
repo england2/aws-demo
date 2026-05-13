@@ -499,3 +499,5 @@ Consistency with the local code context takes precedence over global style prefe
 
 - Don't spend time on formatting thought-loops unless it’s directly needed for compilation; when it’s not, just call it out as a next step for me.
 - Always ensure your reasoning is spent on solving problems, not wrangling with tools.
+
+- Don't hand-write SQL-accessing code in go! Refer to docs/external/sqlc-docs.md to see a guide on using sqlc.
