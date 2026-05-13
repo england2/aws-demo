@@ -13,7 +13,10 @@ import (
 	"time"
 
 	sharedproto "conductor-testing/proto"
-	"go-conductor/util"
+	util "go-conductor/util"
+
+	scheduler "go-conductor/go-db-scheduler"
+
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -21,6 +24,7 @@ import (
 )
 
 var serverAddr = flag.String("addr", "localhost:50055", "The server address in the format of host:port")
+var dbLocation = flag.String("test-db-loc", "", "path to the test database file")
 
 type conductorServer struct {
 	sharedproto.UnimplementedWorkerEventReceiverServiceServer
@@ -126,7 +130,33 @@ const conductorShuttingDown = "IS_CONDUCTOR_SHUTTING_DOWN"
 
 var isGlobalShutdownOkay bool
 
-func main() {
+
+
+func dbtestingmain() {
+	flag.Parse()
+
+	// ============================================================
+	// Before new message
+	// ============================================================
+
+	decisions, err := scheduler.Run(context.Background(), scheduler.Config{
+		DBPath: *dbLocation,
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	encoded, err := json.MarshalIndent(decisions, "", "  ")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Println(string(encoded))
+}
+
+
+
+func main_real() {
 	flag.Parse()
 
 	// build runtime and shutdown files
@@ -212,4 +242,16 @@ func main() {
 	if err := os.WriteFile(safeShutdownSucceededPath, []byte("true\n"), 0o644); err != nil {
 		log.Fatalf("write safe shutdown succeeded file: %v", err)
 	}
+}
+
+
+func main() {
+	main_testing()
+}
+
+
+// ai--- can we import stuff????
+func main_testing() {
+	fmt.Println("CALLING DBTESTING MAIN")
+	dbtestingmain()
 }
