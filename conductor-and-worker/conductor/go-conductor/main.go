@@ -40,10 +40,11 @@ type conductorServer struct {
 // gRPC Server-side procedure implementations
 // =============================================================
 //
-// These functions are handled concurrently by the conductor's gRPC server.
-// Each request carries WorkerIdentity so the handler can attach work to the
-// conductor's in-memory representation of the worker that sent it.
+// These functions are handled concurrently by the conductor's gRPC server. Each request carries
+// WorkerIdentity so the handler can attach work to the conductor's in-memory representation of the
+// worker that sent it.
 //
+
 
 func (s *conductorServer) WorkerStartsTest(ctx context.Context, msg *sharedproto.Test) (*sharedproto.TestResponse, error) {
 	workerID, err := workerIDFromIdentity(msg.GetWorker())
@@ -279,22 +280,20 @@ func main_testing() {
 		log.Fatal("test-db-loc is required")
 	}
 
-	// ai-- this needs to be named dbContext!
-	// ai-- ensure the other ctx in this function are unique! reference main_real to see real setup.
-	ctx := context.Background()
+	dbContext := context.Background()
 
 	if *debugAlwaysNewDB {
-		createdDatabasePath, err := debugCreateNewDbAndSetLocation(ctx, schedulerDatabasePath)
+		createdDatabasePath, err := debugCreateNewDbAndSetLocation(dbContext, schedulerDatabasePath)
 		if err != nil {
 			log.Fatalf("create debug scheduler database: %v", err)
 		}
 		schedulerDatabasePath = createdDatabasePath
-	} else if !checkIsDbCompliant(ctx, schedulerDatabasePath) {
+	} else if !checkIsDbCompliant(dbContext, schedulerDatabasePath) {
 		fmt.Fprintf(os.Stderr, "database is not compliant: %s\n", schedulerDatabasePath)
 		return
 	}
 
-	schedulerWorker, err := scheduler.Open(ctx, scheduler.Config{
+	schedulerWorker, err := scheduler.Open(dbContext, scheduler.Config{
 		DBPath: schedulerDatabasePath,
 	})
 	if err != nil {
@@ -302,7 +301,10 @@ func main_testing() {
 	}
 	defer schedulerWorker.Close()
 
-	sqsPoller, err := NewTicketCloudWatchSQSPoller(ctx)
+	pollingContext, cancelPollingContext := context.WithCancel(context.Background())
+	defer cancelPollingContext()
+
+	sqsPoller, err := NewTicketCloudWatchSQSPoller(pollingContext)
 	if err != nil {
 		log.Fatalf("create sqs poller: %v", err)
 	}
@@ -337,30 +339,69 @@ func main_testing() {
 	// Poll loop
 	// =============================================================
 
-	messages, pollErrors := sqsPoller.Start(ctx)
+	messages, pollErrors := sqsPoller.Start(pollingContext)
 
 	fmt.Printf("polling SQS queue with scheduler DB %s\n", schedulerDatabasePath)
 
-	// ai-- will running this in a goroutine have strange side effects? will the shutdown gate be the main program blocker?
-	go func() {
+	chanPollDone := make(chan struct{})
+
+	// ai--done
+	go func(pollLoopContext context.Context, chanPollDone <-chan struct{}) {
+		defer fmt.Println("Polling loop ended")
+
 		for {
 			select {
+			case <-chanPollDone:
+				return
+			case <-pollLoopContext.Done():
+				return
 			case polledSQSMessage, ok := <-messages:
 				if !ok {
 					return
 				}
-				fmt.Println("[Conductor] got sqs message!")
-				scheduleDecisions, err := insertPolledSQSMessageAndRunScheduler(ctx, schedulerWorker, polledSQSMessage)
-				if err == nil {
-					err = sqsPoller.DeleteMessage(ctx, polledSQSMessage.ReceiptHandle)
+
+				// ==============================================================================
+				// This block is executed whenever the poller gets an SQS message. Largely, it is
+				// one of the major brains of the program in addition to the scheduler logic and
+				// worker-managing gRPC prodecures.
+				// ==============================================================================
+
+				// Correctly gaurd against milisecond scenarios where we get a SQS message in the
+				// space of Go's for-select turn speed after we should be draining the server.
+				select {
+				case <-chanPollDone:
+					return
+				case <-pollLoopContext.Done():
+					return
+				default:
 				}
-				if err != nil {
+
+				fmt.Println("[Conductor] got sqs message!")
+
+				// ==== call to the scheduler ====
+				scheduleDecisions, err := insertPolledSQSMessageAndRunScheduler(pollLoopContext, schedulerWorker, polledSQSMessage)
+				if err == nil {
+					err = sqsPoller.DeleteMessage(pollLoopContext, polledSQSMessage.ReceiptHandle)
+				} else {
 					fmt.Fprintf(os.Stderr, "handle sqs message %q: %v\n", polledSQSMessage.ExternalMessageID, err)
 					continue
 				}
 				if err := printSchedulerDecisions(scheduleDecisions); err != nil {
 					fmt.Fprintf(os.Stderr, "print scheduler decisions for sqs message %q: %v\n", polledSQSMessage.ExternalMessageID, err)
 				}
+
+				// ==== build and spawn a worker ====
+
+				// ---- test spawning ----
+				if err := registry.spawnWorker(workerSpawnConfig{
+					ConductorGrpcServerAddr: *serverAddr,
+					WorkerID:                util.GenerateWorkerName(),
+					RunDir:                  runDir,
+				}); err != nil {
+					log.Fatalf("spawn worker: %v", err)
+				}
+				// ---- test spawning over ----
+
 			case err, ok := <-pollErrors:
 				if !ok {
 					pollErrors = nil
@@ -369,16 +410,14 @@ func main_testing() {
 				fmt.Fprintf(os.Stderr, "poll sqs: %v\n", err)
 			}
 		}
-
-		fmt.Println("Polling loop ended")
-
-	}()
+	}(pollingContext, chanPollDone)
 
 	// ============================================================
 	// Safe Shutdown Gate
 	// ============================================================
 
 	var numActiveWorkers int
+	pollStopSignaled := false
 	for {
 		time.Sleep(5 * time.Second)
 
@@ -393,6 +432,11 @@ func main_testing() {
 		}
 
 		if isShutdownOkay {
+			if !pollStopSignaled {
+				close(chanPollDone)
+				cancelPollingContext()
+				pollStopSignaled = true
+			}
 			numActiveWorkers = registry.getNumActiveWorkers()
 			fmt.Printf("SHUTDOWN_OKAY is true, waiting for %d workers to finish", numActiveWorkers)
 		} else {
