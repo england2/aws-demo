@@ -245,6 +245,10 @@ func main_testing() {
 
 	flag.Parse()
 
+	// =============================================================
+	// Database Setup and Polling Setup
+	// =============================================================
+
 	schedulerDatabasePath := testSchedulerDatabasePathFromFlags()
 	if schedulerDatabasePath == "" {
 		log.Fatal("test-db-loc is required")
@@ -276,7 +280,12 @@ func main_testing() {
 		log.Fatalf("create sqs poller: %v", err)
 	}
 
+	// =============================================================
+	// Poll loop
+	// =============================================================
+
 	messages, pollErrors := sqsPoller.Start(ctx)
+
 	fmt.Printf("polling SQS queue with scheduler DB %s\n", schedulerDatabasePath)
 
 	for {
@@ -285,6 +294,7 @@ func main_testing() {
 			if !ok {
 				return
 			}
+			fmt.Println("[Conductor] got sqs message!")
 			scheduleDecisions, err := insertPolledSQSMessageAndRunScheduler(ctx, schedulerWorker, polledSQSMessage)
 			if err == nil {
 				err = sqsPoller.DeleteMessage(ctx, polledSQSMessage.ReceiptHandle)

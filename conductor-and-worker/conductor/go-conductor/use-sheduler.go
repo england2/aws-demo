@@ -26,7 +26,6 @@ func runSchedulerAndPrintDecisions(ctx context.Context, schedulerDatabasePath st
 
 // printSchedulerDecisions renders scheduler output for the ad hoc main_testing flow.
 // It is called after RunScheduling returns so polling logs show the exact spawn decisions produced for a message.
-// ai--done
 func printSchedulerDecisions(scheduleDecisions []shared.ScheduleDecision) error {
 	encoded, err := json.MarshalIndent(scheduleDecisions, "", "  ")
 	if err != nil {

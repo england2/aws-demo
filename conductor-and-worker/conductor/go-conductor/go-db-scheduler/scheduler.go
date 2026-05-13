@@ -5,7 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
+	"os"
 	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	"go-conductor/db-internal/shared"
@@ -15,6 +20,8 @@ import (
 )
 
 const chainWindow = time.Hour
+
+var schedulerDebugLogger = slog.New(newSchedulerStdoutHandler(os.Stdout))
 
 type Config struct {
 	DBPath string
@@ -28,6 +35,79 @@ type IncomingMessage struct {
 type Worker struct {
 	db *sql.DB
 	q  *sqlcgen.Queries
+}
+
+type schedulerStdoutHandler struct {
+	writer io.Writer
+	mutex  *sync.Mutex
+	attrs  []slog.Attr
+}
+
+// newSchedulerStdoutHandler keeps slog as the scheduler logging API while printing compact smoke-test lines.
+// The output shape is intentionally human-first: "[SHEDULER timestamp] message key=value" on stdout.
+func newSchedulerStdoutHandler(writer io.Writer) slog.Handler {
+	return &schedulerStdoutHandler{
+		writer: writer,
+		mutex:  &sync.Mutex{},
+	}
+}
+
+func (handler *schedulerStdoutHandler) Enabled(context.Context, slog.Level) bool {
+	return true
+}
+
+func (handler *schedulerStdoutHandler) Handle(_ context.Context, record slog.Record) error {
+	var line strings.Builder
+	timestamp := record.Time.Format("2006-01-02--15:04:05")
+	line.WriteString("[SHEDULER ")
+	line.WriteString(timestamp)
+	line.WriteString("] ")
+	line.WriteString(record.Message)
+
+	writeAttr := func(attr slog.Attr) {
+		attr.Value = attr.Value.Resolve()
+		if attr.Equal(slog.Attr{}) {
+			return
+		}
+		line.WriteByte(' ')
+		line.WriteString(attr.Key)
+		line.WriteByte('=')
+		line.WriteString(attr.Value.String())
+	}
+	for _, attr := range handler.attrs {
+		writeAttr(attr)
+	}
+	record.Attrs(func(attr slog.Attr) bool {
+		writeAttr(attr)
+		return true
+	})
+	line.WriteByte('\n')
+
+	handler.mutex.Lock()
+	defer handler.mutex.Unlock()
+	_, err := io.WriteString(handler.writer, line.String())
+	return err
+}
+
+func (handler *schedulerStdoutHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	copiedAttrs := make([]slog.Attr, 0, len(handler.attrs)+len(attrs))
+	copiedAttrs = append(copiedAttrs, handler.attrs...)
+	copiedAttrs = append(copiedAttrs, attrs...)
+	return &schedulerStdoutHandler{
+		writer: handler.writer,
+		mutex:  handler.mutex,
+		attrs:  copiedAttrs,
+	}
+}
+
+func (handler *schedulerStdoutHandler) WithGroup(string) slog.Handler {
+	return handler
+}
+
+// logSchedulerDebug prints timestamped scheduler trace lines for local conductor smoke runs.
+// It wraps slog so the scheduler gets stdout now and keeps a structured logging path for future OTEL bridging.
+func logSchedulerDebug(message string, args ...any) {
+	schedulerDebugLogger.Debug(message, args...)
 }
 
 func Run(ctx context.Context, cfg Config) ([]shared.ScheduleDecision, error) {
@@ -87,6 +167,7 @@ func (w *Worker) InsertAlarmMessages(ctx context.Context, messages []IncomingMes
 // Conductor polling calls this after it has translated an SQS delivery into IncomingMessage; the returned decisions
 // are handed back to main so external SQS delete ordering stays outside the scheduler package.
 func (w *Worker) InsertAlarmMessageAndRunScheduling(ctx context.Context, message IncomingMessage) ([]shared.ScheduleDecision, error) {
+	logSchedulerDebug("inserting alarm message", "account", message.AccountNumber, "body_bytes", len(message.RawBody))
 	if err := w.InsertAlarmMessages(ctx, []IncomingMessage{message}); err != nil {
 		return nil, err
 	}
@@ -107,6 +188,8 @@ func (w *Worker) InsertTicketMessages(ctx context.Context, messages []IncomingMe
 }
 
 func (w *Worker) RunScheduling(ctx context.Context) ([]shared.ScheduleDecision, error) {
+	logSchedulerDebug("starting scheduling pass")
+
 	tx, err := w.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -132,6 +215,7 @@ func (w *Worker) RunScheduling(ctx context.Context) ([]shared.ScheduleDecision, 
 		return nil, err
 	}
 
+	logSchedulerDebug("scheduling pass complete", "decisions", len(decisions))
 	return decisions, nil
 }
 
@@ -140,6 +224,7 @@ func scheduleAlarms(ctx context.Context, q *sqlcgen.Queries) ([]shared.ScheduleD
 	if err != nil {
 		return nil, err
 	}
+	logSchedulerDebug("loaded alarm rows", "count", len(rows))
 	if len(rows) == 0 {
 		return nil, nil
 	}
@@ -158,6 +243,9 @@ func scheduleAlarms(ctx context.Context, q *sqlcgen.Queries) ([]shared.ScheduleD
 	var current []sqlcgen.SqsAlarmMessage
 
 	flush := func(chain []sqlcgen.SqsAlarmMessage) error {
+		if len(chain) > 0 {
+			logSchedulerDebug("evaluating alarm chain", "account", chain[0].AwsAccountNumber, "rows", len(chain))
+		}
 		decision, ok, err := processAlarmChain(ctx, q, chain)
 		if err != nil {
 			return err
@@ -200,6 +288,7 @@ func scheduleAlarms(ctx context.Context, q *sqlcgen.Queries) ([]shared.ScheduleD
 
 func processAlarmChain(ctx context.Context, q *sqlcgen.Queries, chain []sqlcgen.SqsAlarmMessage) (shared.ScheduleDecision, bool, error) {
 	if len(chain) < 2 {
+		logSchedulerDebug("no alarm decision: chain has fewer than 2 rows")
 		return shared.ScheduleDecision{}, false, nil
 	}
 
@@ -227,10 +316,12 @@ func processAlarmChain(ctx context.Context, q *sqlcgen.Queries, chain []sqlcgen.
 	}
 
 	if alreadyDecided {
+		logSchedulerDebug("no alarm decision: chain already returned a spawn decision")
 		return shared.ScheduleDecision{}, false, nil
 	}
 
 	newest := chain[len(chain)-1]
+	logSchedulerDebug("scheduling alarm decision", "account", newest.AwsAccountNumber, "chain_rows", len(chain), "newest_alarm_row_id", newest.ID)
 	return shared.ScheduleDecision{
 		ToSchedule:    true,
 		Text:          newest.RawMessageBody,
@@ -243,6 +334,7 @@ func scheduleTickets(ctx context.Context, q *sqlcgen.Queries) ([]shared.Schedule
 	if err != nil {
 		return nil, err
 	}
+	logSchedulerDebug("loaded ticket rows needing decision", "count", len(rows))
 
 	decisions := make([]shared.ScheduleDecision, 0, len(rows))
 	for _, row := range rows {
@@ -258,6 +350,7 @@ func scheduleTickets(ctx context.Context, q *sqlcgen.Queries) ([]shared.Schedule
 			Text:          row.RawMessageBody,
 			AccountNumber: row.AwsAccountNumber,
 		})
+		logSchedulerDebug("scheduling ticket decision", "account", row.AwsAccountNumber, "ticket_row_id", row.ID)
 	}
 
 	return decisions, nil
