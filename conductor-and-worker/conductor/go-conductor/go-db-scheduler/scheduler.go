@@ -8,8 +8,8 @@ import (
 	"sort"
 	"time"
 
-	"database-and-scheduler/db-internal/shared"
-	"database-and-scheduler/db-internal/sqlcgen"
+	"go-conductor/db-internal/shared"
+	sqlcgen "go-conductor/db-internal/sqlc-generated"
 
 	_ "modernc.org/sqlite"
 )

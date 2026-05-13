@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -13,10 +14,8 @@ import (
 	"time"
 
 	sharedproto "conductor-testing/proto"
-	util "go-conductor/util"
-
 	scheduler "go-conductor/go-db-scheduler"
-
+	util "go-conductor/util"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -130,8 +129,6 @@ const conductorShuttingDown = "IS_CONDUCTOR_SHUTTING_DOWN"
 
 var isGlobalShutdownOkay bool
 
-
-
 func dbtestingmain() {
 	flag.Parse()
 
@@ -153,8 +150,6 @@ func dbtestingmain() {
 	}
 	fmt.Println(string(encoded))
 }
-
-
 
 func main_real() {
 	flag.Parse()
@@ -244,13 +239,10 @@ func main_real() {
 	}
 }
 
-
 func main() {
 	main_testing()
 }
 
-
-// ai--- can we import stuff????
 func main_testing() {
 	fmt.Println("CALLING DBTESTING MAIN")
 	dbtestingmain()
