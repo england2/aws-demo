@@ -23,6 +23,12 @@ ignore.*
 # ignore db if we test locally
 database-*.sqlite
 
-# ignore local files
+# ignore database test files
+**/DB_TESTDATA/data/*
+
+# ignore local env files
 .envrc
 .local
+
+# ignore binaries
+conductor-and-worker/worker/go-worker/go-worker
