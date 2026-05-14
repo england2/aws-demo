@@ -6,9 +6,18 @@ As far as I know, "Agent Orchestrator" largely refers to systems that spin up mu
 
 The noun "conductor" is mostly unclaimed in this context, and I have it to mean that this system is largely responsible for the lifecycle of multiple agents working on *separate features in separate codebases*, rather than coordinating close-quarters work between agents.
 
-### Required packages
-
+### Required To Build and Run Locally
+``` txt
+go1.26.2
+protobuf-compiler / protoc
 protobuf-devel
 protoc-gen-go
 protoc-gen-go-grpc
 sqlc
+fish
+fd
+gofumpt
+```
+
+#### Warning! 🏴‍☠️
+As of May 14, this codebase needs refactoring and has scripts specific to my machine.
