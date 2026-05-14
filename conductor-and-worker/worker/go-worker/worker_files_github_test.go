@@ -107,6 +107,7 @@ func TestValidateSuccessfulWorkerArtifactsRejectsUncommittedWorktree(t *testing.
 	}
 }
 
+// counter-factural confirmed
 func TestWriteGitHubReportMarkdownIncludesReportAndTranscriptDetails(t *testing.T) {
 	workerRuntimePaths := testWorkerRuntimePaths(t)
 	reportMarkdown := "# Final Report\n\nOutcome: Succeeded.\n"
@@ -126,14 +127,22 @@ func TestWriteGitHubReportMarkdownIncludesReportAndTranscriptDetails(t *testing.
 	gitHubReportText := string(gitHubReportBytes)
 	for _, expectedText := range []string{
 		"# Agent Work Report",
+		"## Final Report",
 		"Outcome: Succeeded.",
+		"## Full Agent Transcript",
 		"<details>",
-		"Click to see full Codex transcript JSON",
+		"Click to see full agent transcript JSON",
 		`{"turns":[{"role":"assistant"}]}`,
 	} {
 		if !strings.Contains(gitHubReportText, expectedText) {
 			t.Fatalf("GitHub report markdown missing %q:\n%s", expectedText, gitHubReportText)
 		}
+	}
+	if strings.Contains(gitHubReportText, "## Final Report\n\n# Final Report") {
+		t.Fatalf("GitHub report markdown repeats final report headings:\n%s", gitHubReportText)
+	}
+	if !strings.Contains(gitHubReportText, "Outcome: Succeeded.\n\n## Full Agent Transcript\n\n<details>") {
+		t.Fatalf("GitHub transcript details should be under its own heading:\n%s", gitHubReportText)
 	}
 }
 

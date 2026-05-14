@@ -239,27 +239,46 @@ func writeGitHubReportMarkdown(workerRuntimePaths WorkerRuntimePaths, transcript
 		return "", fmt.Errorf("read ending report for GitHub body: %w", err)
 	}
 
+	endingReportMarkdown := stripLeadingFinalReportHeading(strings.TrimSpace(string(endingReportBytes)))
+
 	gitHubReportMarkdown := fmt.Sprintf(`# Agent Work Report
 
 ## Final Report
 
 %s
 
+## Full Agent Transcript
+
 <details>
-<summary>Click to see full Codex transcript JSON</summary>
+<summary>Click to see full agent transcript JSON</summary>
 
 `+"```"+`json
 %s
 `+"```"+`
 
 </details>
-`, strings.TrimSpace(string(endingReportBytes)), string(transcriptJSON))
+`, endingReportMarkdown, string(transcriptJSON))
 
 	if err := os.WriteFile(workerRuntimePaths.PRMessagePath, []byte(gitHubReportMarkdown), 0o644); err != nil {
 		return "", fmt.Errorf("write GitHub report markdown: %w", err)
 	}
 
 	return workerRuntimePaths.PRMessagePath, nil
+}
+
+func stripLeadingFinalReportHeading(reportMarkdown string) string {
+	reportLines := strings.Split(reportMarkdown, "\n")
+	if len(reportLines) == 0 {
+		return reportMarkdown
+	}
+
+	firstLine := strings.TrimSpace(reportLines[0])
+	headingText := strings.TrimSpace(strings.TrimLeft(firstLine, "#"))
+	if strings.HasPrefix(firstLine, "#") && headingText == "Final Report" {
+		return strings.TrimSpace(strings.Join(reportLines[1:], "\n"))
+	}
+
+	return reportMarkdown
 }
 
 func createPullRequestFromWorkerRepo(
