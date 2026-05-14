@@ -151,7 +151,7 @@ func TestRequestWorkFilesExtractsReceivedChunks(t *testing.T) {
 	if conductorClient.receivedFileTransferRequest.GetWorker().GetWorkerId() != workerID {
 		t.Fatalf("request worker id = %q, want %q", conductorClient.receivedFileTransferRequest.GetWorker().GetWorkerId(), workerID)
 	}
-	expectedWorkerMessage := "[worker-test-request]: requesting work files"
+	expectedWorkerMessage := "requesting work files"
 	if conductorClient.receivedFileTransferRequest.GetWorkerMessage() != expectedWorkerMessage {
 		t.Fatalf("request worker message = %q, want %q", conductorClient.receivedFileTransferRequest.GetWorkerMessage(), expectedWorkerMessage)
 	}
@@ -233,7 +233,7 @@ func TestSendCodexErrorSendsExpectedMessage(t *testing.T) {
 	if conductorClient.receivedCodexError.GetWorkerId() != workerIdentity.GetWorkerId() {
 		t.Fatalf("codex error worker id = %q, want %q", conductorClient.receivedCodexError.GetWorkerId(), workerIdentity.GetWorkerId())
 	}
-	expectedWorkerMessage := "[worker-test-codex-error]: codex error: unexpected EOF"
+	expectedWorkerMessage := "codex error: unexpected EOF"
 	if conductorClient.receivedCodexError.GetWorkerMessage() != expectedWorkerMessage {
 		t.Fatalf("codex error worker message = %q, want %q", conductorClient.receivedCodexError.GetWorkerMessage(), expectedWorkerMessage)
 	}
@@ -271,7 +271,7 @@ func TestUploadFilesStreamsZipWithWorkerMetadataOnFirstChunk(t *testing.T) {
 	if firstChunk.GetWorker().GetWorkerId() != workerID {
 		t.Fatalf("first uploaded chunk worker id = %q, want %q", firstChunk.GetWorker().GetWorkerId(), workerID)
 	}
-	expectedWorkerMessage := "[worker-test-upload]: uploading files"
+	expectedWorkerMessage := "uploading files"
 	if firstChunk.GetWorkerMessage() != expectedWorkerMessage {
 		t.Fatalf("first uploaded chunk worker message = %q, want %q", firstChunk.GetWorkerMessage(), expectedWorkerMessage)
 	}

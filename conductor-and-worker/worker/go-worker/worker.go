@@ -60,7 +60,7 @@ func sendCodexError(
 	codexErr error,
 ) error {
 	workerID := workerIdentity.GetWorkerId()
-	workerMessage := fmt.Sprintf("[%s]: codex error: %v", workerID, codexErr)
+	workerMessage := fmt.Sprintf("codex error: %v", codexErr)
 	codexErrorResponse, err := conductorClient.WorkerSendsCodexError(ctx, &sharedproto.CodexError{
 		WorkerId:      workerID,
 		WorkerMessage: workerMessage,
@@ -190,7 +190,7 @@ func main() {
 
 	handshakeResponse, err := conductorClient.WorkerStartsHandshake(grpcContext, &sharedproto.Handshake{
 		Worker:        workerIdentity,
-		WorkerMessage: fmt.Sprintf("[%s]: starting handshake", workerID),
+		WorkerMessage: "starting handshake",
 	})
 	if err != nil {
 		log.Fatalf("start worker handshake: %v", err)
@@ -304,7 +304,7 @@ func main() {
 	// Now that we've finished our work, we can safely shutdown.
 	shutdownResponse, err := conductorClient.WorkerStartsShutdown(grpcContext, &sharedproto.Shutdown{
 		Worker:        workerIdentity,
-		WorkerMessage: fmt.Sprintf("[%s]: safely ended", workerID),
+		WorkerMessage: "safely ended",
 	})
 	if err != nil {
 		log.Fatalf("start worker shutdown: %v", err)

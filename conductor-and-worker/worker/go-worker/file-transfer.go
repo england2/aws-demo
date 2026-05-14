@@ -20,7 +20,7 @@ func requestWorkFiles(
 	workerID := workerIdentity.GetWorkerId()
 	workFilesStream, err := conductorClient.WorkerRequestsWorkFiles(ctx, &sharedproto.FileTransferRequest{
 		Worker:        workerIdentity,
-		WorkerMessage: fmt.Sprintf("[%s]: requesting work files", workerID),
+		WorkerMessage: "requesting work files",
 	})
 	if err != nil {
 		return fmt.Errorf("request work files stream: %w", err)
@@ -70,7 +70,7 @@ func uploadFiles(
 		return fmt.Errorf("open uploaded files stream: %w", err)
 	}
 
-	workerUploadMessage := fmt.Sprintf("[%s]: uploading files", workerID)
+	workerUploadMessage := "uploading files"
 	if err := sharedlib.StreamFileAsChunks(uploadedFilesZipPath, sharedlib.FileTransferChunkSizeBytes, func(fileTransferChunk sharedlib.FileTransferChunk) error {
 		uploadedFilesChunk := &sharedproto.FileTransferChunk{
 			Content:    fileTransferChunk.Content,

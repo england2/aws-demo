@@ -43,7 +43,7 @@ func (s *conductorServer) WorkerRequestsWorkFiles(
 		return status.Errorf(codes.FailedPrecondition, "worker %q has not completed handshake", workerID)
 	}
 
-	fmt.Printf("[from worker: %q] %q\n", worker.ID, req.GetWorkerMessage())
+	printWorkerMessage(worker.ID, req.GetWorkerMessage())
 
 	workerZipFilePath, err := prepareWorkerWorkFilesZip(worker.RunDir, workerID, worker.WorkFilesDir)
 	if err != nil {
@@ -88,7 +88,7 @@ func (s *conductorServer) WorkerUploadsFiles(
 
 			worker = foundWorker
 			workerUploadMessage = uploadedFilesChunk.GetWorkerMessage()
-			fmt.Printf("[from worker: %q] %q\n", worker.ID, workerUploadMessage)
+			printWorkerMessage(worker.ID, workerUploadMessage)
 		}
 
 		return sharedlib.FileTransferChunk{

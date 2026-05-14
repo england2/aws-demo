@@ -63,7 +63,7 @@ func (s *conductorServer) WorkerStartsTest(ctx context.Context, msg *sharedproto
 
 	worker.recordEvent(WorkerEventStartsTest, msg)
 
-	fmt.Printf("[from worker: %q] %q\n", worker.ID, msg.GetWorkerMessage())
+	printWorkerMessage(worker.ID, msg.GetWorkerMessage())
 
 	return &sharedproto.TestResponse{
 		Worker:        msg.GetWorker(),
@@ -82,7 +82,7 @@ func (s *conductorServer) WorkerStartsHandshake(ctx context.Context, msg *shared
 		return nil, err
 	}
 
-	fmt.Printf("[from worker: %q] %q\n", worker.ID, msg.GetWorkerMessage())
+	printWorkerMessage(worker.ID, msg.GetWorkerMessage())
 
 	return &sharedproto.HandshakeResponse{
 		WorkerMessage: fmt.Sprintf("Conductor gets message: \"%s\"", msg.GetWorkerMessage()),
@@ -100,7 +100,7 @@ func (s *conductorServer) WorkerStartsShutdown(ctx context.Context, msg *sharedp
 		return nil, err
 	}
 
-	fmt.Printf("[from worker: %q] %q\n", worker.ID, msg.GetWorkerMessage())
+	printWorkerMessage(worker.ID, msg.GetWorkerMessage())
 
 	if err := s.registry.waitFargateAndDeregister(workerID); err != nil {
 		return nil, err
@@ -123,7 +123,7 @@ func (s *conductorServer) WorkerSendsCodexError(ctx context.Context, msg *shared
 		return nil, err
 	}
 
-	fmt.Printf("[from worker: %q] %q\n", worker.ID, msg.GetWorkerMessage())
+	printWorkerMessage(worker.ID, msg.GetWorkerMessage())
 
 	return &sharedproto.GeneralResponse{
 		WorkerId:      worker.ID,

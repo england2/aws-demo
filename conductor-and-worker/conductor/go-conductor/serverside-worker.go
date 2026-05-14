@@ -208,6 +208,10 @@ func workerIDFromIdentity(identity *sharedproto.WorkerIdentity) (string, error) 
 	return workerID, nil
 }
 
+func printWorkerMessage(workerID string, workerMessage string) {
+	fmt.Printf("[from worker %s]: %q\n", workerID, workerMessage)
+}
+
 // =============================================================
 //  Events and Event Fuctions
 // =============================================================
