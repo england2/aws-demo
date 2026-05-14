@@ -232,6 +232,8 @@ func firstExistingWorkerRepoBaseRef(repoPath string, baseRefs []string) (string,
 }
 
 func writeGitHubReportMarkdown(workerRuntimePaths WorkerRuntimePaths, transcriptJSON []byte) (string, error) {
+	fmt.Printf("[internal]: building GitHub report from ending_report=%s transcript_bytes=%d\n", workerRuntimePaths.EndingReportPath, len(transcriptJSON))
+
 	endingReportBytes, err := os.ReadFile(workerRuntimePaths.EndingReportPath)
 	if err != nil {
 		return "", fmt.Errorf("read ending report for GitHub body: %w", err)
@@ -271,11 +273,13 @@ func createPullRequestFromWorkerRepo(
 		return PullRequestCreationResult{}, err
 	}
 
+	fmt.Printf("[internal %s]: pushing worker repo branch repo=%s branch=%s\n", workerID, repoPath, branchName)
 	if _, err := runWorkerRepoCommand(ctx, repoPath, "git", "push", "-u", "origin", branchName); err != nil {
 		return PullRequestCreationResult{}, err
 	}
 
 	pullRequestTitle := buildGitHubTitleFromReport(prMessagePath, fmt.Sprintf("Worker %s changes", workerID))
+	fmt.Printf("[internal %s]: creating GitHub pull request base=main head=%s title=%q body_file=%s\n", workerID, branchName, pullRequestTitle, prMessagePath)
 	pullRequestOutput, err := runWorkerRepoCommand(ctx, repoPath, "gh", "pr", "create", "--base", "main", "--head", branchName, "--title", pullRequestTitle, "--body-file", prMessagePath)
 	if err != nil {
 		return PullRequestCreationResult{}, err
@@ -294,6 +298,7 @@ func createFailedWorkerGitHubIssue(
 	workerID string,
 ) (GitHubIssueCreationResult, error) {
 	failedWorkerTitle := "[agent-failed] " + buildGitHubTitleFromReport(gitHubReportPath, fmt.Sprintf("Worker %s failed", workerID))
+	fmt.Printf("[internal %s]: creating failed-worker GitHub issue repo=%s title=%q body_file=%s\n", workerID, repoPath, failedWorkerTitle, gitHubReportPath)
 	gitHubIssueOutput, err := runWorkerRepoCommand(ctx, repoPath, "gh", "issue", "create", "--title", failedWorkerTitle, "--body-file", gitHubReportPath)
 	if err != nil {
 		return GitHubIssueCreationResult{}, err
@@ -326,6 +331,8 @@ func buildGitHubTitleFromReport(reportPath string, fallbackTitle string) string 
 }
 
 func runWorkerRepoCommand(ctx context.Context, repoPath string, commandName string, commandArgs ...string) ([]byte, error) {
+	fmt.Printf("[internal]: running repo command in %s: %s %s\n", repoPath, commandName, strings.Join(commandArgs, " "))
+
 	repoCommand := exec.CommandContext(ctx, commandName, commandArgs...)
 	repoCommand.Dir = repoPath
 

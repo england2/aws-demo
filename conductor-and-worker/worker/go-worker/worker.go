@@ -7,6 +7,7 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"strings"
 
 	sharedproto "conductor-testing/proto"
 
@@ -228,16 +229,27 @@ func main() {
 
 	var workerCodexRunResult WorkerCodexRunResult
 	for validationAttemptNumber := 1; validationAttemptNumber <= maxWorkerArtifactValidationAttempts; validationAttemptNumber++ {
+		fmt.Printf("[internal %s]: validating worker artifacts attempt %d/%d\n", workerID, validationAttemptNumber, maxWorkerArtifactValidationAttempts)
+
 		var validationErrors []string
 		workerCodexRunResult, validationErrors = validateWorkerCodexArtifacts(workerRuntimePaths)
 		if len(validationErrors) == 0 {
+			fmt.Printf(
+				"[internal %s]: worker artifact validation passed should_create_pull_request=%t repo_path=%q\n",
+				workerID,
+				workerCodexRunResult.ShouldCreatePullRequest,
+				workerCodexRunResult.RepoPath,
+			)
 			break
 		}
+
+		fmt.Printf("[internal %s]: worker artifact validation failed: %s\n", workerID, strings.Join(validationErrors, "; "))
 
 		if validationAttemptNumber == maxWorkerArtifactValidationAttempts {
 			reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, buildWorkerArtifactValidationFailureError(validationErrors))
 		}
 
+		fmt.Printf("[internal %s]: running artifact correction prompt\n", workerID)
 		correctionPrompt := buildWorkerArtifactCorrectionPrompt(workerRuntimePaths, validationErrors, validationAttemptNumber+1, maxWorkerArtifactValidationAttempts)
 		correctionResult, err := codexThread.Run(codexContext, correctionPrompt, nil)
 		if err != nil {
@@ -250,28 +262,35 @@ func main() {
 	// Produce GitHub report and create a PR or failure issue
 	// =============================================================
 
+	fmt.Printf("[internal %s]: reading Codex transcript for GitHub report\n", workerID)
 	transcriptJSON, err := readCodexThreadTranscriptJSON(codexContext, codexClient, codexThread)
 	if err != nil {
 		reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, err)
 	}
 
+	fmt.Printf("[internal %s]: writing GitHub report markdown\n", workerID)
 	gitHubReportPath, err := writeGitHubReportMarkdown(workerRuntimePaths, transcriptJSON)
 	if err != nil {
 		reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, err)
 	}
+	fmt.Printf("[internal %s]: GitHub report markdown written to %s\n", workerID, gitHubReportPath)
 
 	if workerCodexRunResult.ShouldCreatePullRequest {
+		fmt.Printf("[internal %s]: worker succeeded; creating GitHub pull request from %s\n", workerID, workerCodexRunResult.RepoPath)
 		pullRequestCreationResult, err := createPullRequestFromWorkerRepo(codexContext, workerCodexRunResult.RepoPath, gitHubReportPath, workerID)
 		if err != nil {
 			reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, err)
 		}
 		fmt.Printf("[internal %s]: created pull request from branch %s:\n%s\n", workerID, pullRequestCreationResult.BranchName, pullRequestCreationResult.Output)
 	} else if repoPath, repoAvailable := findOptionalWorkerGitRepo(workerRuntimePaths); repoAvailable {
+		fmt.Printf("[internal %s]: worker did not request PR; creating failed-worker GitHub issue from %s\n", workerID, repoPath)
 		gitHubIssueCreationResult, err := createFailedWorkerGitHubIssue(codexContext, repoPath, gitHubReportPath, workerID)
 		if err != nil {
 			reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, err)
 		}
 		fmt.Printf("[internal %s]: created failed-worker GitHub issue:\n%s\n", workerID, gitHubIssueCreationResult.Output)
+	} else {
+		fmt.Printf("[internal %s]: worker did not request PR and no Git repo was available; skipping GitHub publication\n", workerID)
 	}
 
 	if err := uploadFiles(grpcContext, conductorClient, workerIdentity); err != nil {
