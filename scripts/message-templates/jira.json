@@ -1,0 +1,130 @@
+{
+  "id": "10002",
+  "key": "ENG-123",
+  "self": "https://your-domain.atlassian.net/rest/api/3/issue/10002",
+  "fields": {
+    "summary": "Login fails after session timeout",
+    "description": {
+      "type": "doc",
+      "version": 1,
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "Users are redirected to a blank page after their session expires."
+            }
+          ]
+        }
+      ]
+    },
+    "issuetype": {
+      "id": "10004",
+      "name": "Bug",
+      "subtask": false
+    },
+    "project": {
+      "id": "10000",
+      "key": "ENG",
+      "name": "Engineering"
+    },
+    "status": {
+      "id": "10001",
+      "name": "To Do",
+      "statusCategory": {
+        "id": 2,
+        "key": "new",
+        "name": "To Do"
+      }
+    },
+    "priority": {
+      "id": "2",
+      "name": "High"
+    },
+    "assignee": {
+      "accountId": "abc123",
+      "displayName": "Jane Developer",
+      "active": true
+    },
+    "reporter": {
+      "accountId": "def456",
+      "displayName": "Sam Reporter",
+      "active": true
+    },
+    "created": "2026-05-12T18:22:14.000+0000",
+    "updated": "2026-05-13T09:41:03.000+0000",
+    "labels": ["auth", "session"],
+    "components": [
+      {
+        "id": "10010",
+        "name": "Authentication"
+      }
+    ],
+    "fixVersions": [],
+    "attachment": [
+      {
+        "id": "10000",
+        "filename": "screenshot.png",
+        "mimeType": "image/png",
+        "size": 23123,
+        "content": "https://your-domain.atlassian.net/rest/api/3/attachment/content/10000"
+      }
+    ],
+    "comment": {
+      "comments": [
+        {
+          "id": "10001",
+          "body": {
+            "type": "doc",
+            "version": 1,
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "This reproduces in Chrome and Firefox."
+                  }
+                ]
+              }
+            ]
+          },
+          "author": {
+            "accountId": "def456",
+            "displayName": "Sam Reporter"
+          },
+          "created": "2026-05-12T19:00:00.000+0000",
+          "updated": "2026-05-12T19:00:00.000+0000"
+        }
+      ],
+      "maxResults": 1,
+      "total": 1,
+      "startAt": 0
+    },
+    "issuelinks": [
+      {
+        "id": "10020",
+        "type": {
+          "id": "10000",
+          "name": "Blocks",
+          "inward": "is blocked by",
+          "outward": "blocks"
+        },
+        "outwardIssue": {
+          "id": "10003",
+          "key": "ENG-124",
+          "fields": {
+            "summary": "Session refresh endpoint returns 500",
+            "status": {
+              "name": "In Progress"
+            }
+          }
+        }
+      }
+    ],
+    "subtasks": [],
+    "customfield_10011": "Sprint 12",
+    "customfield_10014": "ENG-99"
+  }
+}
