@@ -269,22 +269,22 @@ func main() {
 	}
 
 	fmt.Printf("[internal %s]: writing GitHub report markdown\n", workerID)
-	gitHubReportPath, err := writeGitHubReportMarkdown(workerRuntimePaths, transcriptJSON)
+	gitHubReportMarkdownResult, err := writeGitHubReportMarkdown(workerRuntimePaths, transcriptJSON)
 	if err != nil {
 		reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, err)
 	}
-	fmt.Printf("[internal %s]: GitHub report markdown written to %s\n", workerID, gitHubReportPath)
+	fmt.Printf("[internal %s]: GitHub report markdown written to %s title=%q\n", workerID, gitHubReportMarkdownResult.Path, gitHubReportMarkdownResult.Title)
 
 	if workerCodexRunResult.ShouldCreatePullRequest {
 		fmt.Printf("[internal %s]: worker succeeded; creating GitHub pull request from %s\n", workerID, workerCodexRunResult.RepoPath)
-		pullRequestCreationResult, err := createPullRequestFromWorkerRepo(codexContext, workerCodexRunResult.RepoPath, gitHubReportPath, workerID)
+		pullRequestCreationResult, err := createPullRequestFromWorkerRepo(codexContext, workerCodexRunResult.RepoPath, gitHubReportMarkdownResult.Path, gitHubReportMarkdownResult.Title, workerID)
 		if err != nil {
 			reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, err)
 		}
 		fmt.Printf("[internal %s]: created pull request from branch %s:\n%s\n", workerID, pullRequestCreationResult.BranchName, pullRequestCreationResult.Output)
 	} else if repoPath, repoAvailable := findOptionalWorkerGitRepo(workerRuntimePaths); repoAvailable {
 		fmt.Printf("[internal %s]: worker did not request PR; creating failed-worker GitHub issue from %s\n", workerID, repoPath)
-		gitHubIssueCreationResult, err := createFailedWorkerGitHubIssue(codexContext, repoPath, gitHubReportPath, workerID)
+		gitHubIssueCreationResult, err := createFailedWorkerGitHubIssue(codexContext, repoPath, gitHubReportMarkdownResult.Path, gitHubReportMarkdownResult.Title, workerID)
 		if err != nil {
 			reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, err)
 		}

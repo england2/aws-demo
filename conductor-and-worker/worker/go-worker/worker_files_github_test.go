@@ -110,17 +110,20 @@ func TestValidateSuccessfulWorkerArtifactsRejectsUncommittedWorktree(t *testing.
 // counter-factural confirmed
 func TestWriteGitHubReportMarkdownIncludesReportAndTranscriptDetails(t *testing.T) {
 	workerRuntimePaths := testWorkerRuntimePaths(t)
-	reportMarkdown := "# Final Report\n\nOutcome: Succeeded.\n"
+	reportMarkdown := "Fix number-adder CLI args\n\n# Final Report\n\nOutcome: Succeeded.\n"
 	if err := os.WriteFile(workerRuntimePaths.EndingReportPath, []byte(reportMarkdown), 0o644); err != nil {
 		t.Fatalf("write ending report: %v", err)
 	}
 
-	gitHubReportPath, err := writeGitHubReportMarkdown(workerRuntimePaths, []byte(`{"turns":[{"role":"assistant"}]}`))
+	gitHubReportMarkdownResult, err := writeGitHubReportMarkdown(workerRuntimePaths, []byte(`{"turns":[{"role":"assistant"}]}`))
 	if err != nil {
 		t.Fatalf("write GitHub report markdown: %v", err)
 	}
+	if gitHubReportMarkdownResult.Title != "Fix number-adder CLI args" {
+		t.Fatalf("GitHub report title = %q, want first ending report line", gitHubReportMarkdownResult.Title)
+	}
 
-	gitHubReportBytes, err := os.ReadFile(gitHubReportPath)
+	gitHubReportBytes, err := os.ReadFile(gitHubReportMarkdownResult.Path)
 	if err != nil {
 		t.Fatalf("read GitHub report markdown: %v", err)
 	}
@@ -140,6 +143,9 @@ func TestWriteGitHubReportMarkdownIncludesReportAndTranscriptDetails(t *testing.
 	}
 	if strings.Contains(gitHubReportText, "## Final Report\n\n# Final Report") {
 		t.Fatalf("GitHub report markdown repeats final report headings:\n%s", gitHubReportText)
+	}
+	if strings.Contains(gitHubReportText, "Fix number-adder CLI args") {
+		t.Fatalf("GitHub report markdown should not render first-line title:\n%s", gitHubReportText)
 	}
 	if !strings.Contains(gitHubReportText, "Outcome: Succeeded.\n\n## Full Agent Transcript\n\n<details>") {
 		t.Fatalf("GitHub transcript details should be under its own heading:\n%s", gitHubReportText)
@@ -174,7 +180,7 @@ printf 'https://github.example/pull/1\n'
 		t.Fatalf("write PR message: %v", err)
 	}
 
-	pullRequestCreationResult, err := createPullRequestFromWorkerRepo(context.Background(), repoPath, prMessagePath, "worker-test")
+	pullRequestCreationResult, err := createPullRequestFromWorkerRepo(context.Background(), repoPath, prMessagePath, "Add number-adder CLI args", "worker-test")
 	if err != nil {
 		t.Fatalf("create pull request: %v", err)
 	}
@@ -195,6 +201,43 @@ printf 'https://github.example/pull/1\n'
 	}
 	if !strings.Contains(commandLogText, "--body-file "+prMessagePath) {
 		t.Fatalf("command log missing body file path:\n%s", commandLogText)
+	}
+	if !strings.Contains(commandLogText, "--title Add number-adder CLI args") {
+		t.Fatalf("command log missing first-line report title:\n%s", commandLogText)
+	}
+}
+
+func TestCreateFailedWorkerGitHubIssueUsesPassedReportTitle(t *testing.T) {
+	temporaryBinDir := t.TempDir()
+	commandLogPath := filepath.Join(t.TempDir(), "commands.log")
+	writeExecutableScript(t, filepath.Join(temporaryBinDir, "gh"), `#!/bin/sh
+printf 'gh %s\n' "$*" >> "$TEST_COMMAND_LOG"
+printf 'https://github.example/issues/1\n'
+`)
+	t.Setenv("PATH", temporaryBinDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("TEST_COMMAND_LOG", commandLogPath)
+
+	repoPath := t.TempDir()
+	gitHubReportPath := filepath.Join(t.TempDir(), "github-report.md")
+	if err := os.WriteFile(gitHubReportPath, []byte("# Agent Work Report\n\n## Final Report\n\nBody.\n"), 0o644); err != nil {
+		t.Fatalf("write GitHub report: %v", err)
+	}
+
+	_, err := createFailedWorkerGitHubIssue(context.Background(), repoPath, gitHubReportPath, "GitHub auth failed during sparse checkout", "worker-test")
+	if err != nil {
+		t.Fatalf("create failed worker GitHub issue: %v", err)
+	}
+
+	commandLogBytes, err := os.ReadFile(commandLogPath)
+	if err != nil {
+		t.Fatalf("read command log: %v", err)
+	}
+	commandLogText := string(commandLogBytes)
+	if !strings.Contains(commandLogText, "gh issue create --title [agent-failed] GitHub auth failed during sparse checkout") {
+		t.Fatalf("command log missing failed issue title:\n%s", commandLogText)
+	}
+	if strings.Contains(commandLogText, "Agent's Job Understanding") || strings.Contains(commandLogText, "Final Report") {
+		t.Fatalf("failed issue title should not be derived from report headings:\n%s", commandLogText)
 	}
 }
 

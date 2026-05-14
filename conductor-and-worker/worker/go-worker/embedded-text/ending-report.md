@@ -38,7 +38,11 @@ Positive outcomes may be mentioned, but the report should prioritize headaches, 
 
 Use the exact report structure below. Keep the headings exactly as written.
 
+The very first line of `/worker/work/agent-meta/ending-report.md` must be a concise plain-text GitHub title. This first line will be used as the pull request or failure issue title and will be removed from the rendered report body. Do not prefix it with `#`, `Title:`, or any other label. Keep it under 120 characters.
+
 ```markdown
+Concise PR or issue title goes here
+
 # Final Report
 
 ## Agent's Job Understanding
@@ -156,6 +160,8 @@ Still include meaningful frictions if any occurred.
 Example:
 
 ```markdown
+Add CLI argument support to number-adder
+
 # Final Report
 
 ## Agent's Job Understanding

@@ -34,6 +34,11 @@ type GitHubIssueCreationResult struct {
 	Output string
 }
 
+type GitHubReportMarkdownResult struct {
+	Path  string
+	Title string
+}
+
 func defaultWorkerRuntimePaths() WorkerRuntimePaths {
 	workerAgentMetaDir := filepath.Join(workerWorkFilesDestinationDir, "agent-meta")
 
@@ -231,15 +236,16 @@ func firstExistingWorkerRepoBaseRef(repoPath string, baseRefs []string) (string,
 	return "", fmt.Errorf("repo %q has neither origin/main nor main available for branch comparison", repoPath)
 }
 
-func writeGitHubReportMarkdown(workerRuntimePaths WorkerRuntimePaths, transcriptJSON []byte) (string, error) {
+func writeGitHubReportMarkdown(workerRuntimePaths WorkerRuntimePaths, transcriptJSON []byte) (GitHubReportMarkdownResult, error) {
 	fmt.Printf("[internal]: building GitHub report from ending_report=%s transcript_bytes=%d\n", workerRuntimePaths.EndingReportPath, len(transcriptJSON))
 
 	endingReportBytes, err := os.ReadFile(workerRuntimePaths.EndingReportPath)
 	if err != nil {
-		return "", fmt.Errorf("read ending report for GitHub body: %w", err)
+		return GitHubReportMarkdownResult{}, fmt.Errorf("read ending report for GitHub body: %w", err)
 	}
 
-	endingReportMarkdown := stripLeadingFinalReportHeading(strings.TrimSpace(string(endingReportBytes)))
+	gitHubTitle, endingReportMarkdown := splitEndingReportTitleAndBody(strings.TrimSpace(string(endingReportBytes)), "Agent work report")
+	endingReportMarkdown = stripLeadingFinalReportHeading(endingReportMarkdown)
 
 	gitHubReportMarkdown := fmt.Sprintf(`# Agent Work Report
 
@@ -260,10 +266,30 @@ func writeGitHubReportMarkdown(workerRuntimePaths WorkerRuntimePaths, transcript
 `, endingReportMarkdown, string(transcriptJSON))
 
 	if err := os.WriteFile(workerRuntimePaths.PRMessagePath, []byte(gitHubReportMarkdown), 0o644); err != nil {
-		return "", fmt.Errorf("write GitHub report markdown: %w", err)
+		return GitHubReportMarkdownResult{}, fmt.Errorf("write GitHub report markdown: %w", err)
 	}
 
-	return workerRuntimePaths.PRMessagePath, nil
+	return GitHubReportMarkdownResult{
+		Path:  workerRuntimePaths.PRMessagePath,
+		Title: gitHubTitle,
+	}, nil
+}
+
+func splitEndingReportTitleAndBody(reportMarkdown string, fallbackTitle string) (string, string) {
+	reportLines := strings.Split(reportMarkdown, "\n")
+	if len(reportLines) == 0 {
+		return fallbackTitle, reportMarkdown
+	}
+
+	title := strings.TrimSpace(reportLines[0])
+	if title == "" {
+		title = fallbackTitle
+	}
+	if len(title) > 120 {
+		title = title[:120]
+	}
+
+	return title, strings.TrimSpace(strings.Join(reportLines[1:], "\n"))
 }
 
 func stripLeadingFinalReportHeading(reportMarkdown string) string {
@@ -285,6 +311,7 @@ func createPullRequestFromWorkerRepo(
 	ctx context.Context,
 	repoPath string,
 	prMessagePath string,
+	pullRequestTitle string,
 	workerID string,
 ) (PullRequestCreationResult, error) {
 	branchName, err := currentWorkerRepoBranchName(repoPath)
@@ -297,7 +324,6 @@ func createPullRequestFromWorkerRepo(
 		return PullRequestCreationResult{}, err
 	}
 
-	pullRequestTitle := buildGitHubTitleFromReport(prMessagePath, fmt.Sprintf("Worker %s changes", workerID))
 	fmt.Printf("[internal %s]: creating GitHub pull request base=main head=%s title=%q body_file=%s\n", workerID, branchName, pullRequestTitle, prMessagePath)
 	pullRequestOutput, err := runWorkerRepoCommand(ctx, repoPath, "gh", "pr", "create", "--base", "main", "--head", branchName, "--title", pullRequestTitle, "--body-file", prMessagePath)
 	if err != nil {
@@ -314,9 +340,10 @@ func createFailedWorkerGitHubIssue(
 	ctx context.Context,
 	repoPath string,
 	gitHubReportPath string,
+	gitHubReportTitle string,
 	workerID string,
 ) (GitHubIssueCreationResult, error) {
-	failedWorkerTitle := "[agent-failed] " + buildGitHubTitleFromReport(gitHubReportPath, fmt.Sprintf("Worker %s failed", workerID))
+	failedWorkerTitle := "[agent-failed] " + gitHubReportTitle
 	fmt.Printf("[internal %s]: creating failed-worker GitHub issue repo=%s title=%q body_file=%s\n", workerID, repoPath, failedWorkerTitle, gitHubReportPath)
 	gitHubIssueOutput, err := runWorkerRepoCommand(ctx, repoPath, "gh", "issue", "create", "--title", failedWorkerTitle, "--body-file", gitHubReportPath)
 	if err != nil {
@@ -326,27 +353,6 @@ func createFailedWorkerGitHubIssue(
 	return GitHubIssueCreationResult{
 		Output: string(gitHubIssueOutput),
 	}, nil
-}
-
-func buildGitHubTitleFromReport(reportPath string, fallbackTitle string) string {
-	reportBytes, err := os.ReadFile(reportPath)
-	if err != nil {
-		return fallbackTitle
-	}
-
-	for _, reportLine := range strings.Split(string(reportBytes), "\n") {
-		reportLine = strings.TrimSpace(reportLine)
-		reportLine = strings.TrimLeft(reportLine, "# \t")
-		if reportLine == "" || reportLine == "Agent Work Report" || reportLine == "Final Report" {
-			continue
-		}
-		if len(reportLine) > 120 {
-			return reportLine[:120]
-		}
-		return reportLine
-	}
-
-	return fallbackTitle
 }
 
 func runWorkerRepoCommand(ctx context.Context, repoPath string, commandName string, commandArgs ...string) ([]byte, error) {
