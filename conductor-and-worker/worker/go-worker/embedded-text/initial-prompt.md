@@ -55,14 +55,14 @@ Do not mark the job successful while on `main` or `master`. Do not mark the job 
 
 # Getting your work (extremely important!)
 
-You can run `clone-repo.sh` to pull the repo you are working on to:
+You can run `clone-repo.fish` to pull the repo you are working on to:
 
 ```text
 /worker/work/repo/<repo-specific-subdir>
 ```
 
-Use `clone-repo.sh` as the source of truth for getting the repository. It creates a sparse checkout containing only the directories that are intentionally available for this task.
+Use `clone-repo.fish` as the source of truth for getting the repository. It creates a sparse checkout containing only the directories that are intentionally available for this task.
 
-Work only inside the sparse checkout created by `clone-repo.sh`. Do not disable sparse checkout. Do not run commands that expand the sparse checkout. Do not fetch, checkout, copy, or inspect extra repository directories outside the sparse paths provided. Do not clone a second copy of the repository somewhere else to get around the sparse checkout.
+Work only inside the sparse checkout created by `clone-repo.fish`. Do not disable sparse checkout. Do not run commands that expand the sparse checkout. Do not fetch, checkout, copy, or inspect extra repository directories outside the sparse paths provided. Do not clone a second copy of the repository somewhere else to get around the sparse checkout.
 
 If the task appears to require files outside the sparse checkout, stop early, write the final report, explain exactly which missing files or directories blocked the work, and write `false` to `/worker/work/agent-meta/WAS_JOB_SUCCESSFUL`.
