@@ -36,38 +36,74 @@ Positive outcomes may be mentioned, but the report should prioritize headaches, 
 
 ## REQUIRED REPORT STRUCTURE
 
-Use the exact report structure below.
+Use the exact report structure below. Keep the headings exactly as written.
 
 ```markdown
 # Final Report
 
-## Outcome
+## Agent's Job Understanding
 
-State whether the task succeeded or failed.
+State your high-level understanding of the user's requested task in 2-5 sentences.
 
-## Work Completed
+Do not list routine setup actions such as reading TASK.md, reading AGENTS.md, starting the worker, or opening the repository unless one of those actions revealed a meaningful blocker.
 
-Briefly summarize what was changed, created, inspected, or verified.
+## Task Success Opinion
+
+Write exactly one of these lines:
+
+- Task succeeded.
+- Task failed.
+
+Then add 1-3 sentences explaining the reason.
+
+## Code Alteration Description
+
+Describe the meaningful source code, configuration, documentation, or test changes made during the task.
+
+Focus on behavior and intent, not a diary of actions. Do not report trivial process steps such as reading files, inspecting directories, creating the report file, or writing the success marker.
+
+If no code or repository files were changed, say so directly and explain why.
+
+Include a very small code snippet only when it clarifies an important change. Do not include large diffs or unrelated command output.
+
+## Code Alteration Verification
+
+State what checks were run and what their results were. Include tests, builds, linters, formatters, manual runtime checks, or targeted inspections.
+
+If checks were skipped, say why. Do not claim verification that was not actually run.
+
+## External System State Changes
+
+State whether any command may have changed external or durable system state outside the task repository.
+
+Examples include Terraform apply, AWS resource changes, Docker container starts/stops, database migrations, GitHub issue/PR creation, package publication, remote deployments, or modifying secrets.
+
+If none were attempted, write: "None known."
+
+If uncertain, say what might have changed and why.
 
 ## Frictions and Headaches
 
-List the main difficulties encountered while doing the work. Include errors, failed commands, missing context, tool limitations, permissions issues, timeouts, dependency problems, confusing requirements, or unexpected runtime behavior.
+List only meaningful difficulties that would help a human or future agent improve the environment or continue the work.
 
-## Failed or Abandoned Attempts
+Include important errors, failed commands, missing context, tool limitations, permissions issues, timeouts, dependency problems, confusing requirements, or unexpected runtime behavior.
 
-Describe approaches that were tried but did not work. Include why they failed when known.
+Do not list harmless retries, routine command failures that were immediately corrected, or ordinary exploration steps unless they changed the outcome or consumed meaningful time.
 
-## Verification
-
-State what checks were run and what their results were. If checks were skipped, explain why.
+If the task succeeded cleanly and there were no meaningful frictions, write: "None significant."
 
 ## Remaining Risks or Follow-Ups
 
 List unresolved problems, assumptions, incomplete work, fragile areas, or anything a human should inspect next.
 
+If there are no known follow-ups, write: "None known."
+
 ## Additional Notes
 
-Any other useful information that doesn't fit into the above category.
+Include only useful information that does not fit above.
+
+Do not use this section for a second summary, a task log, or filler. If there is nothing useful to add, write: "None."
+
 ```
 
 # What to Capture
@@ -84,6 +120,16 @@ Include relevant details from the agent's execution, especially:
 - Tests, linters, builds, deployments, or checks that could not be run.
 - Any assumptions made to continue despite incomplete information.
 - Any files or components most likely to need human review.
+
+Do not include routine progress log entries such as:
+
+- Read `/worker/work/TASK.md`.
+- Read `/worker/work/AGENTS.md`.
+- Ran `clone-repo.fish` successfully.
+- Created `/worker/work/agent-meta/WAS_JOB_SUCCESSFUL`.
+- Wrote `/worker/work/agent-meta/ending-report.md`.
+
+Include those actions only when they produced a meaningful blocker, surprising result, or decision-relevant fact.
 
 ## If the Job Failed
 
@@ -110,20 +156,41 @@ Still include meaningful frictions if any occurred.
 Example:
 
 ```markdown
-Outcome: Succeeded.
+# Final Report
 
-Work completed:
-- Added final report generation for the Fargate coding agent.
-- Documented friction-first reporting expectations.
+## Agent's Job Understanding
 
-Verification:
-- Reviewed the generated Markdown for clarity and completeness.
+The task was to add command-line argument support to the Rust number-adder program.
 
-Frictions:
-- None significant.
+## Task Success Opinion
 
-Remaining risks:
-- None known.
+Task succeeded.
+
+The requested behavior was implemented, committed on a feature branch, and verified.
+
+## Code Alteration Description
+
+Added parsing for three accepted CLI arguments in `test-applications/number-adder/src/main.rs` and updated the usage output.
+
+## Code Alteration Verification
+
+Ran `cargo test` and `cargo run -- --help`; both passed.
+
+## External System State Changes
+
+None known.
+
+## Frictions and Headaches
+
+None significant.
+
+## Remaining Risks or Follow-Ups
+
+None known.
+
+## Additional Notes
+
+None.
 ```
 
 ## Style Requirements
