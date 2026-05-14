@@ -14,23 +14,21 @@ terraform.tfvars
 *.tfplan
 crash.log
 
-# wildcard ignores
+# wildcard
 ignore.*
 \#ignore.*
 .\#ignore.*
 
-# keep documentation files, (p) real md files
-!*.docs.md
-
-# ignore db if we test locally
+# database
 database-*.sqlite
-
-# ignore database test files
 **/DB_TESTDATA/data/*
 
-# ignore local env files
+# local env files
 .envrc
 .local
 
-# ignore binaries
+# binaries
 conductor-and-worker/worker/go-worker/go-worker
+
+# rust examples
+**/target/

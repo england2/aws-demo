@@ -480,24 +480,13 @@ token
 Consistency with the local code context takes precedence over global style preferences.
 
 # Project Specific notes
-
 - Local Go binary: `/home/t/.go/bin/go`
 - Prefer the local Go toolchain for `go test`, `go build`, and related checks instead of Docker.
 - Format command: `scripts/format`
 - Proto generation: `scripts/gen-proto`
-- Docker image build: `scripts/build-local-images.sh`
-  - (Don't use this)
-- Local tmux run: `scripts/run-tmux`
-  - (Don't use this)
-- CLI dump run with single output: `scripts/run-cli`
-  - (Use this to see program output)
-
-- This is a learning project whose structure we will use in a production program; Therefore, we have to get design decisions/implementations correct.
+- This is a learning project whose structure should model a production program; Therefore, we have to get design decisions correct.
 - There is no need to restore deleted binaries or care about their tracking -- don't worry about it and move on.
-
 - `plans-docs-etc/codex-sdk-go-guide.md` contains notes on how to use the go codex sdk.
-
 - Don't spend time on formatting thought-loops unless it’s directly needed for compilation; when it’s not, just call it out as a next step for me.
 - Always ensure your reasoning is spent on solving problems, not wrangling with tools.
-
-- Don't hand-write SQL-accessing code in go! Refer to docs/external/sqlc-docs.md to see a guide on using sqlc.
+- Don't hand-write SQL-accessing code in go! Refer to `docs/external/sqlc-docs.md` to see a guide on using sqlc.
