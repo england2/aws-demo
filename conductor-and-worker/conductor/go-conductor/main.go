@@ -446,27 +446,28 @@ func main_testing() {
 						scheduleDecision.MessageType,
 					)
 
+					// Defining our spawn function.
+					spawnFunc := func(spawnContext context.Context, launchedWorkerConfig workerSpawnConfig) error {
+						spawnResult, err := Spawn(spawnContext, fargateWorkerSpawnRequest)
+						if err != nil {
+							return err
+						}
+						fmt.Printf(
+							"[Conductor] spawned fargate worker %s task=%s\n",
+							launchedWorkerConfig.WorkerID,
+							spawnResult.TaskARN,
+						)
+						return nil
+					}
+
 					// Add the new worker to the registry and launch its Fargate task.
 					if err := registry.spawnWorker(
 						pollLoopContext,
 						newWorkerSpawnConfig,
-						func(spawnContext context.Context, launchedWorkerConfig workerSpawnConfig) error {
-							spawnResult, err := Spawn(spawnContext, fargateWorkerSpawnRequest)
-							if err != nil {
-								return err
-							}
-							fmt.Printf(
-								"[Conductor] spawned fargate worker %s task=%s\n",
-								launchedWorkerConfig.WorkerID,
-								spawnResult.TaskARN,
-							)
-							return nil
-						},
+						spawnFunc,
 					); err != nil {
 						log.Fatalf("spawn worker: %v", err)
 					}
-
-					// ai--done Fargate launcher is inline here so this call site owns the selected spawn path.
 				}
 
 			case err, ok := <-pollErrors:
