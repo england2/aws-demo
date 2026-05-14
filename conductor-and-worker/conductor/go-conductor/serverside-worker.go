@@ -32,12 +32,6 @@ type spawnedWorker struct {
 	Events []workerEventRecord
 }
 
-type workerSpawnConfig struct {
-	ConductorGrpcServerAddr string
-	WorkerID                string
-	RunDir                  string
-}
-
 func (w *spawnedWorker) didHandshakeSucceed() bool {
 	// We interpet worker state by inspecting seen worker events rather than creating and fliping
 	// booleans fields in workers structs for every possible worker state.

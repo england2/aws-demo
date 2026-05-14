@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	sharedproto "conductor-testing/proto"
+	"go-conductor/db-internal/shared"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -59,7 +60,12 @@ func (stream *testUploadedFilesStream) SendAndClose(response *sharedproto.Genera
 }
 
 func TestPrepareWorkerWorkFilesZipUsesTicketWorkerResources(t *testing.T) {
-	workerZipFilePath, err := prepareWorkerWorkFilesZip(t.TempDir(), "worker-test-ticket")
+	workerID := "worker-test-ticket"
+	workerTaskText := "Investigate ticket ENG-123.\n"
+	workerRunDir := t.TempDir()
+	workerWorkFilesDir := seedTestWorkerWorkFiles(t, workerRunDir, workerID, shared.ScheduleMessageTypeTicket, workerTaskText)
+
+	workerZipFilePath, err := prepareWorkerWorkFilesZip(workerRunDir, workerID, workerWorkFilesDir)
 	if err != nil {
 		t.Fatalf("prepare worker work files zip: %v", err)
 	}
@@ -70,10 +76,25 @@ func TestPrepareWorkerWorkFilesZipUsesTicketWorkerResources(t *testing.T) {
 	}
 	defer zipReader.Close()
 
-	assertZipFilesMatchTicketWorkerResources(t, zipReader.File)
+	assertZipFilesMatchWorkerResources(t, zipReader.File, ticketWorkerResourceDir, workerTaskText)
 }
 
-func TestMustTicketWorkerResourcesDirExistPanicsWhenCwdDoesNotContainResources(t *testing.T) {
+func TestSeedWorkerWorkFilesUsesIncidentWorkerResources(t *testing.T) {
+	workerID := "worker-test-incident"
+	workerTaskText := "Investigate high CPU incident.\n"
+	workerRunDir := t.TempDir()
+	workerWorkFilesDir := seedTestWorkerWorkFiles(t, workerRunDir, workerID, shared.ScheduleMessageTypeIncident, workerTaskText)
+
+	assertFileContents(t, filepath.Join(workerWorkFilesDir, workerTaskFileRelativePath), workerTaskText)
+
+	incidentAgentsFileContents, err := os.ReadFile(filepath.Join(incidentWorkerResourceDir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read incident worker AGENTS.md: %v", err)
+	}
+	assertFileContents(t, filepath.Join(workerWorkFilesDir, "AGENTS.md"), string(incidentAgentsFileContents))
+}
+
+func TestValidateWorkerWorkFilesDirReturnsErrorWhenCwdDoesNotContainResources(t *testing.T) {
 	originalWorkingDir, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("get original working dir: %v", err)
@@ -87,21 +108,21 @@ func TestMustTicketWorkerResourcesDirExistPanicsWhenCwdDoesNotContainResources(t
 		}
 	}()
 
-	defer func() {
-		if recoveredPanic := recover(); recoveredPanic == nil {
-			t.Fatal("mustTicketWorkerResourcesDirExist should panic when cwd lacks worker resources")
-		}
-	}()
-
-	mustTicketWorkerResourcesDirExist()
+	if err := validateWorkerWorkFilesDirExists(ticketWorkerResourceDir); err == nil {
+		t.Fatal("validate worker work files dir should fail when cwd lacks worker resources")
+	}
 }
 
 func TestWorkerRequestsWorkFilesStreamsZipAfterHandshakeAndRecordsEvent(t *testing.T) {
 	workerID := "worker-test"
+	workerTaskText := "Investigate streamed ticket task.\n"
+	workerRunDir := t.TempDir()
+	workerWorkFilesDir := seedTestWorkerWorkFiles(t, workerRunDir, workerID, shared.ScheduleMessageTypeTicket, workerTaskText)
 	workerRegistry := newWorkerRegistry()
 	worker, err := workerRegistry.registerSpawnedWorker(workerSpawnConfig{
-		WorkerID: workerID,
-		RunDir:   t.TempDir(),
+		WorkerID:     workerID,
+		RunDir:       workerRunDir,
+		WorkFilesDir: workerWorkFilesDir,
 	})
 	if err != nil {
 		t.Fatalf("register spawned worker: %v", err)
@@ -151,7 +172,7 @@ func TestWorkerRequestsWorkFilesStreamsZipAfterHandshakeAndRecordsEvent(t *testi
 		t.Fatalf("open streamed zip bytes: %v", err)
 	}
 
-	assertZipFilesMatchTicketWorkerResources(t, zipReader.File)
+	assertZipFilesMatchWorkerResources(t, zipReader.File, ticketWorkerResourceDir, workerTaskText)
 }
 
 func TestWorkerRequestsWorkFilesRequiresHandshake(t *testing.T) {
@@ -189,10 +210,13 @@ func TestWorkerRequestsWorkFilesRequiresHandshake(t *testing.T) {
 
 func TestWorkerRequestsWorkFilesDoesNotRecordSuccessWhenStreamSendFails(t *testing.T) {
 	workerID := "worker-test"
+	workerRunDir := t.TempDir()
+	workerWorkFilesDir := seedTestWorkerWorkFiles(t, workerRunDir, workerID, shared.ScheduleMessageTypeTicket, "stream failure task\n")
 	workerRegistry := newWorkerRegistry()
 	worker, err := workerRegistry.registerSpawnedWorker(workerSpawnConfig{
-		WorkerID: workerID,
-		RunDir:   t.TempDir(),
+		WorkerID:     workerID,
+		RunDir:       workerRunDir,
+		WorkFilesDir: workerWorkFilesDir,
 	})
 	if err != nil {
 		t.Fatalf("register spawned worker: %v", err)
@@ -388,19 +412,38 @@ func TestWorkerSendsCodexErrorRequiresWorkerID(t *testing.T) {
 	}
 }
 
-func assertZipFilesMatchTicketWorkerResources(t *testing.T, zippedFiles []*zip.File) {
+func seedTestWorkerWorkFiles(t *testing.T, workerRunDir string, workerID string, messageType shared.ScheduleMessageType, workerTaskText string) string {
 	t.Helper()
 
-	expectedFilePaths := []string{
-		"AGENTS.md",
-		"TASK.md",
+	workerWorkFilesDir, err := seedWorkerWorkFiles(workerSpawnConfig{
+		ScheduleDecision: shared.ScheduleDecision{
+			ToSchedule:  true,
+			Text:        workerTaskText,
+			MessageType: messageType,
+		},
+		WorkerID: workerID,
+		RunDir:   workerRunDir,
+	})
+	if err != nil {
+		t.Fatalf("seed worker work files: %v", err)
 	}
-	for _, expectedFilePath := range expectedFilePaths {
-		assertZipFileMatchesTicketWorkerResource(t, zippedFiles, expectedFilePath)
-	}
+
+	return workerWorkFilesDir
 }
 
-func assertZipFileMatchesTicketWorkerResource(t *testing.T, zippedFiles []*zip.File, expectedFilePath string) {
+func assertZipFilesMatchWorkerResources(t *testing.T, zippedFiles []*zip.File, workerResourceDir string, expectedTaskFileContents string) {
+	t.Helper()
+
+	assertZipFileContents(t, zippedFiles, workerTaskFileRelativePath, expectedTaskFileContents)
+
+	expectedAgentsFileContents, err := os.ReadFile(filepath.Join(workerResourceDir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read worker resource AGENTS.md: %v", err)
+	}
+	assertZipFileContents(t, zippedFiles, "AGENTS.md", string(expectedAgentsFileContents))
+}
+
+func assertZipFileContents(t *testing.T, zippedFiles []*zip.File, expectedFilePath string, expectedFileContents string) {
 	t.Helper()
 
 	for _, zippedFile := range zippedFiles {
@@ -421,11 +464,7 @@ func assertZipFileMatchesTicketWorkerResource(t *testing.T, zippedFiles []*zip.F
 			t.Fatalf("close zipped file %q: %v", expectedFilePath, closeErr)
 		}
 
-		expectedFileContents, err := os.ReadFile(filepath.Join(ticketWorkerResourceDir, expectedFilePath))
-		if err != nil {
-			t.Fatalf("read ticket worker resource %q: %v", expectedFilePath, err)
-		}
-		if string(actualFileContents) != string(expectedFileContents) {
+		if string(actualFileContents) != expectedFileContents {
 			t.Fatalf("zipped file %q contents = %q, want %q", expectedFilePath, actualFileContents, expectedFileContents)
 		}
 		return

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	sharedproto "conductor-testing/proto"
+	"go-conductor/db-internal/shared"
 	scheduler "go-conductor/go-db-scheduler"
 	util "go-conductor/util"
 
@@ -182,11 +183,21 @@ func main_real() {
 	}()
 
 	// ---- test spawning ----
-	if err := registry.spawnWorker(workerSpawnConfig{
+	testWorkerID := util.GenerateWorkerName()
+	testWorkerSpawnConfig, err := prepareWorkerSpawnConfig(workerSpawnConfig{
+		ScheduleDecision: shared.ScheduleDecision{
+			ToSchedule:  true,
+			Text:        "Manual conductor startup test worker.",
+			MessageType: shared.ScheduleMessageTypeTicket,
+		},
 		ConductorGrpcServerAddr: *serverAddr,
-		WorkerID:                util.GenerateWorkerName(),
+		WorkerID:                testWorkerID,
 		RunDir:                  runDir,
-	}); err != nil {
+	})
+	if err != nil {
+		log.Fatalf("prepare worker work files: %v", err)
+	}
+	if err := registry.spawnWorker(testWorkerSpawnConfig); err != nil {
 		log.Fatalf("spawn worker: %v", err)
 	}
 	// ---- test spawning over ----
@@ -375,7 +386,7 @@ func main_testing() {
 
 				fmt.Println("[Conductor] got sqs message!")
 
-				// ==== call to the scheduler ====
+				// Call to the scheduler.
 				scheduleDecisions, err := insertPolledSQSMessageAndRunScheduler(pollLoopContext, schedulerWorker, polledSQSMessage)
 				if err == nil {
 					err = sqsPoller.DeleteMessage(pollLoopContext, polledSQSMessage.ReceiptHandle)
@@ -386,21 +397,31 @@ func main_testing() {
 				if err := printSchedulerDecisions(scheduleDecisions); err != nil {
 					fmt.Fprintf(os.Stderr, "print scheduler decisions for sqs message %q: %v\n", polledSQSMessage.ExternalMessageID, err)
 				}
+
+				// =========================================================
+				// Worker Spawn Block
+				// =========================================================
 				for _, scheduleDecision := range scheduleDecisions {
 					fmt.Printf("[Conductor] scheduler decision type: %s\n", scheduleDecision.MessageType)
-				}
 
-				// ==== build and spawn a worker ====
+					// Create a new worker spawn config
+					newWorkerName := util.GenerateWorkerName()
+					newWorkerSpawnConfig, err := prepareWorkerSpawnConfig(workerSpawnConfig{
+						ScheduleDecision:        scheduleDecision,
+						ConductorGrpcServerAddr: *serverAddr,
+						WorkerID:                newWorkerName,
+						RunDir:                  runDir,
+					})
+					if err != nil {
+						log.Fatalf("prepare worker work files: %v", err)
+					}
 
-				// ---- test spawning ----
-				if err := registry.spawnWorker(workerSpawnConfig{
-					ConductorGrpcServerAddr: *serverAddr,
-					WorkerID:                util.GenerateWorkerName(),
-					RunDir:                  runDir,
-				}); err != nil {
-					log.Fatalf("spawn worker: %v", err)
+					// Add the new worker to the registy.
+					if err := registry.spawnWorker(newWorkerSpawnConfig); err != nil {
+						log.Fatalf("spawn worker: %v", err)
+					}
+
 				}
-				// ---- test spawning over ----
 
 			case err, ok := <-pollErrors:
 				if !ok {

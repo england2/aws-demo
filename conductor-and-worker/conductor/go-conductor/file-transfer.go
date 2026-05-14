@@ -13,8 +13,13 @@ import (
 
 const (
 	// full dir ends up being /conductor/run/filetransfer
-	fileTransferDirName     = "filetransfer"
-	ticketWorkerResourceDir = "worker-resources/ticket-worker"
+	fileTransferDirName          = "filetransfer"
+	workerWorkFilesDirName       = "workfiles"
+	ticketWorkerResourceDir      = "worker-resources/ticket-worker"
+	incidentWorkerResourceDir    = "worker-resources/incident-worker"
+	workerTaskFileRelativePath   = "TASK.md"
+	workerResourceDirectoryPerms = 0o755
+	workerTaskFilePerms          = 0o644
 )
 
 // =============================================================
@@ -40,7 +45,7 @@ func (s *conductorServer) WorkerRequestsWorkFiles(
 
 	fmt.Printf("[from worker: %q] %q\n", worker.ID, req.GetWorkerMessage())
 
-	workerZipFilePath, err := prepareWorkerWorkFilesZip(worker.RunDir, workerID)
+	workerZipFilePath, err := prepareWorkerWorkFilesZip(worker.RunDir, workerID, worker.WorkFilesDir)
 	if err != nil {
 		return fmt.Errorf("prepare worker work files zip: %w", err)
 	}
@@ -125,23 +130,29 @@ func streamWorkFilesZip(
 	})
 }
 
-func prepareWorkerWorkFilesZip(runDir string, workerID string) (string, error) {
-	ticketWorkerResourcesDir := mustTicketWorkerResourcesDirExist()
-
+// prepareWorkerWorkFilesZip compresses the already-seeded work directory for one registered worker.
+// WorkerRequestsWorkFiles calls it after handshake validation, so workFilesDir must already point at the
+// per-worker directory created before spawn by prepareWorkerSpawnConfig.
+func prepareWorkerWorkFilesZip(runDir string, workerID string, workFilesDir string) (string, error) {
+	if err := validateWorkerWorkFilesDirExists(workFilesDir); err != nil {
+		return "", err
+	}
 	workerZipFilePath := filepath.Join(runDir, fileTransferDirName, workerID+".zip")
 	if err := os.Remove(workerZipFilePath); err != nil && !os.IsNotExist(err) {
 		return "", fmt.Errorf("remove old worker zip file: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(workerZipFilePath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(workerZipFilePath), workerResourceDirectoryPerms); err != nil {
 		return "", fmt.Errorf("create worker zip parent dir: %w", err)
 	}
-	if err := sharedlib.ZipDirectory(ticketWorkerResourcesDir, workerZipFilePath); err != nil {
+	if err := sharedlib.ZipDirectory(workFilesDir, workerZipFilePath); err != nil {
 		return "", err
 	}
 
 	return workerZipFilePath, nil
 }
 
+// uploadedWorkerFilesExtractionDir returns the conductor-side destination for files uploaded by a worker.
+// WorkerUploadsFiles uses it after receiving the complete upload zip, keeping returned files under the worker run dir.
 func uploadedWorkerFilesExtractionDir(runDir string, workerID string) string {
 	return filepath.Join(runDir, fileTransferDirName, workerID+"-results")
 }
@@ -150,14 +161,19 @@ func uploadedWorkerFilesExtractionDir(runDir string, workerID string) string {
 // Rig Server-side Worker Directory to Transfer to Worker
 // =============================================================
 
-func mustTicketWorkerResourcesDirExist() string {
-	ticketWorkerResourceDirInfo, err := os.Stat(ticketWorkerResourceDir)
-	if err != nil {
-		panic(fmt.Sprintf("required worker resource dir %q must exist relative to conductor cwd: %v", ticketWorkerResourceDir, err))
+// validateWorkerWorkFilesDirExists checks that a template or prepared worker directory can be zipped.
+// It is used both before copying templates and before streaming files to the worker, so missing runtime resources fail clearly.
+func validateWorkerWorkFilesDirExists(workerWorkFilesDir string) error {
+	if workerWorkFilesDir == "" {
+		return fmt.Errorf("worker work files dir is required")
 	}
-	if !ticketWorkerResourceDirInfo.IsDir() {
-		panic(fmt.Sprintf("required worker resource path %q must be a directory", ticketWorkerResourceDir))
+	workerWorkFilesDirInfo, err := os.Stat(workerWorkFilesDir)
+	if err != nil {
+		return fmt.Errorf("required worker work files dir %q must exist: %w", workerWorkFilesDir, err)
+	}
+	if !workerWorkFilesDirInfo.IsDir() {
+		return fmt.Errorf("required worker work files path %q must be a directory", workerWorkFilesDir)
 	}
 
-	return ticketWorkerResourceDir
+	return nil
 }
