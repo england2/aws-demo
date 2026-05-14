@@ -1,13 +1,15 @@
 #!/bin/bash
 set -euo pipefail
 
-if [ "$#" -ne 1 ]; then
-  echo "usage: $0 <image>"
-  echo "example: $0 204772699175.dkr.ecr.us-west-2.amazonaws.com/conductor:abc123"
+DEFAULT_CONDUCTOR_IMAGE="204772699175.dkr.ecr.us-west-2.amazonaws.com/conductor:latest"
+
+if [ "$#" -gt 1 ]; then
+  echo "usage: $0 [image]"
+  echo "example: $0 204772699175.dkr.ecr.us-west-2.amazonaws.com/conductor:latest"
   exit 1
 fi
 
-CONDUCTOR_IMAGE="$1"
+CONDUCTOR_IMAGE="${1:-$DEFAULT_CONDUCTOR_IMAGE}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REGISTRY="${CONDUCTOR_IMAGE%%/*}"
 REGION="$(echo "$REGISTRY" | cut -d. -f4)"

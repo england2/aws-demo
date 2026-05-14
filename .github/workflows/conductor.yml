@@ -24,7 +24,6 @@ jobs:
       AWS_REGION: us-west-2
       ECR_REPOSITORY: conductor
       DEPLOY_TARGET_TAG: debian-agent-operation
-      ARTIFACT_BUCKET: aws-demo-agent-operation-artifacts-204772699175-us-west-2
 
     steps:
       - name: Check out repository
@@ -87,19 +86,7 @@ jobs:
               "cat > /tmp/deploy-conductor-${{ github.sha }}.sh <<'REMOTE_SCRIPT'",
               "#!/usr/bin/env bash",
               "set -euo pipefail",
-              "TMP_DIR=/tmp/conductor-deploy-${{ github.sha }}",
-              "rm -rf \"$TMP_DIR\"",
-              "mkdir -p \"$TMP_DIR\"",
-              "aws s3 cp \"${{ steps.deploy_scripts.outputs.artifact_uri }}\" \"$TMP_DIR/scripts.tar.gz\"",
-              "tar -xzf \"$TMP_DIR/scripts.tar.gz\" -C \"$TMP_DIR\"",
-              "sudo install -m 0755 \"$TMP_DIR/deploy-conductor.sh\" /home/admin/deploy-conductor.sh",
-              "sudo install -m 0755 \"$TMP_DIR/install-conductor-host.sh\" /home/admin/install-conductor-host.sh",
-              "sudo install -m 0755 \"$TMP_DIR/install-docker.sh\" /home/admin/install-docker.sh",
-              "sudo install -m 0755 \"$TMP_DIR/restart-conductor.sh\" /home/admin/restart-conductor.sh",
-              "sudo install -m 0644 \"$TMP_DIR/docker-compose.conductor.yml\" /home/admin/docker-compose.conductor.yml",
-              "bash /home/admin/install-conductor-host.sh",
               "bash /home/admin/deploy-conductor.sh \"${{ steps.image.outputs.image_uri }}\"",
-              "rm -rf \"$TMP_DIR\"",
               "REMOTE_SCRIPT",
               "bash /tmp/deploy-conductor-${{ github.sha }}.sh",
               "rm -f /tmp/deploy-conductor-${{ github.sha }}.sh"
