@@ -9,50 +9,28 @@ import (
 	"testing"
 	"time"
 
+	"go-conductor/db-internal/shared"
 	scheduler "go-conductor/go-db-scheduler"
 
 	_ "modernc.org/sqlite"
 )
 
-// TestSchedulerIncomingMessageFromPolledSQSMessagePreservesSchedulerFields checks the polling-to-scheduler boundary.
-// It runs after ParseSQSMessageBody would have extracted the account number and confirms the scheduler receives
-// the raw SQS body unchanged, because that raw body is what the database stores and schedules on.
-func TestSchedulerIncomingMessageFromPolledSQSMessagePreservesSchedulerFields(t *testing.T) {
-	accountNumber := "204772699175"
+// TestSchedulerIncomingMessageFromPolledSQSMessagePreservesRawBody checks the polling-to-scheduler boundary.
+// It confirms main only adapts the transport envelope and leaves incident/ticket classification to the scheduler
+// package before any database insert or scheduling decision is made.
+func TestSchedulerIncomingMessageFromPolledSQSMessagePreservesRawBody(t *testing.T) {
 	polledSQSMessage := PolledSQSMessage{
 		ExternalMessageID: "sqs-message-1",
 		Body:              `{"source":"aws.cloudwatch"}`,
 	}
-	parsedSQSMessage := ParsedSQSMessage{
-		AccountNumber: &accountNumber,
-		MessageType:   MessageTypeCloudWatchAlarm,
-	}
 
-	schedulerIncomingMessage, err := schedulerIncomingMessageFromPolledSQSMessage(polledSQSMessage, parsedSQSMessage)
-	if err != nil {
-		t.Fatalf("build scheduler incoming message: %v", err)
-	}
+	schedulerIncomingMessage := schedulerIncomingMessageFromPolledSQSMessage(polledSQSMessage)
 
 	if schedulerIncomingMessage.RawBody != polledSQSMessage.Body {
 		t.Fatalf("RawBody = %q, want %q", schedulerIncomingMessage.RawBody, polledSQSMessage.Body)
 	}
-	if schedulerIncomingMessage.AccountNumber != accountNumber {
-		t.Fatalf("AccountNumber = %q, want %q", schedulerIncomingMessage.AccountNumber, accountNumber)
-	}
-}
-
-// TestSchedulerIncomingMessageFromPolledSQSMessageRequiresAccountNumber protects the scheduler insert boundary.
-// It covers the path main_testing takes before opening database writes, where unsupported or incomplete SQS bodies
-// should fail early instead of being shifted into a database row with guessed account metadata.
-func TestSchedulerIncomingMessageFromPolledSQSMessageRequiresAccountNumber(t *testing.T) {
-	_, err := schedulerIncomingMessageFromPolledSQSMessage(PolledSQSMessage{
-		ExternalMessageID: "sqs-message-1",
-		Body:              `{"source":"aws.cloudwatch"}`,
-	}, ParsedSQSMessage{
-		MessageType: MessageTypeCloudWatchAlarm,
-	})
-	if err == nil {
-		t.Fatal("missing account number should fail")
+	if schedulerIncomingMessage.AccountNumber != "" {
+		t.Fatalf("AccountNumber = %q, want empty scheduler-owned classification field", schedulerIncomingMessage.AccountNumber)
 	}
 }
 
@@ -102,6 +80,9 @@ func TestInsertPolledSQSMessageAndRunSchedulerPersistsSchedulesAndReturnsDecisio
 	if scheduleDecisions[0].AccountNumber != "204772699175" {
 		t.Fatalf("AccountNumber = %q, want 204772699175", scheduleDecisions[0].AccountNumber)
 	}
+	if scheduleDecisions[0].MessageType != shared.ScheduleMessageTypeIncident {
+		t.Fatalf("MessageType = %q, want %q", scheduleDecisions[0].MessageType, shared.ScheduleMessageTypeIncident)
+	}
 
 	totalAlarmRows, chainedAlarmRows, decidedAlarmRows := alarmMessageCounts(t, schedulerDatabasePath)
 	if totalAlarmRows != 2 || chainedAlarmRows != 2 || decidedAlarmRows != 2 {
@@ -130,11 +111,63 @@ func TestInsertPolledSQSMessageAndRunSchedulerRejectsUnsupportedBeforeDelete(t *
 	if err == nil {
 		t.Fatal("unsupported sqs message should fail")
 	}
-	if !strings.Contains(err.Error(), "unsupported sqs message type") {
-		t.Fatalf("error = %q, want unsupported message type", err)
+	if !strings.Contains(err.Error(), "unsupported scheduler message shape") {
+		t.Fatalf("error = %q, want unsupported scheduler message shape", err)
 	}
 	if len(scheduleDecisions) != 0 {
 		t.Fatalf("len(scheduleDecisions) = %d, want 0", len(scheduleDecisions))
+	}
+}
+
+// TestInsertPolledSQSMessageAndRunSchedulerSchedulesTicketDescription covers the ticket polling path.
+// It feeds the documented Jira-style shape through main's scheduler handoff and verifies the returned decision
+// carries ticket type plus flattened description text for later prompt selection.
+func TestInsertPolledSQSMessageAndRunSchedulerSchedulesTicketDescription(t *testing.T) {
+	ctx := context.Background()
+	schedulerDatabasePath := createEmptyMainTestingSchedulerDatabase(t)
+
+	schedulerWorker, err := scheduler.Open(ctx, scheduler.Config{DBPath: schedulerDatabasePath})
+	if err != nil {
+		t.Fatalf("open scheduler: %v", err)
+	}
+	defer schedulerWorker.Close()
+
+	scheduleDecisions, err := insertPolledSQSMessageAndRunScheduler(ctx, schedulerWorker, PolledSQSMessage{
+		ExternalMessageID: "sqs-ticket-1",
+		ReceiptHandle:     "receipt-handle-ticket-1",
+		Body: `{
+			"id": "10002",
+			"key": "ENG-123",
+			"fields": {
+				"description": {
+					"type": "doc",
+					"version": 1,
+					"content": [
+						{
+							"type": "paragraph",
+							"content": [
+								{
+									"type": "text",
+									"text": "Users are redirected to a blank page after their session expires."
+								}
+							]
+						}
+					]
+				}
+			}
+		}`,
+	})
+	if err != nil {
+		t.Fatalf("insert ticket sqs message and run scheduler: %v", err)
+	}
+	if len(scheduleDecisions) != 1 {
+		t.Fatalf("len(scheduleDecisions) = %d, want 1", len(scheduleDecisions))
+	}
+	if scheduleDecisions[0].MessageType != shared.ScheduleMessageTypeTicket {
+		t.Fatalf("MessageType = %q, want %q", scheduleDecisions[0].MessageType, shared.ScheduleMessageTypeTicket)
+	}
+	if scheduleDecisions[0].Text != "Users are redirected to a blank page after their session expires." {
+		t.Fatalf("Text = %q", scheduleDecisions[0].Text)
 	}
 }
 

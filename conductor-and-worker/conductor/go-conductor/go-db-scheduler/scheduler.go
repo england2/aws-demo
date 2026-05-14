@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -29,6 +30,12 @@ type Config struct {
 
 type IncomingMessage struct {
 	RawBody       string
+	AccountNumber string
+}
+
+type parsedIncomingMessage struct {
+	MessageType   shared.ScheduleMessageType
+	Text          string
 	AccountNumber string
 }
 
@@ -170,6 +177,39 @@ func (w *Worker) InsertAlarmMessageAndRunScheduling(ctx context.Context, message
 	logSchedulerDebug("inserting alarm message", "account", message.AccountNumber, "body_bytes", len(message.RawBody))
 	if err := w.InsertAlarmMessages(ctx, []IncomingMessage{message}); err != nil {
 		return nil, err
+	}
+
+	return w.RunScheduling(ctx)
+}
+
+// InsertMessageAndRunScheduling classifies one raw inbound SQS message, stores it in the matching scheduler table,
+// and runs the normal scheduling transaction. Conductor polling calls this so message-type interpretation stays
+// inside the scheduler package while main only reacts to returned ScheduleDecision values.
+func (w *Worker) InsertMessageAndRunScheduling(ctx context.Context, message IncomingMessage) ([]shared.ScheduleDecision, error) {
+	parsedMessage, err := parseIncomingMessageForScheduling(message.RawBody)
+	if err != nil {
+		return nil, err
+	}
+
+	switch parsedMessage.MessageType {
+	case shared.ScheduleMessageTypeIncident:
+		logSchedulerDebug("inserting incident message", "account", parsedMessage.AccountNumber, "body_bytes", len(message.RawBody))
+		if err := w.InsertAlarmMessages(ctx, []IncomingMessage{{
+			RawBody:       message.RawBody,
+			AccountNumber: parsedMessage.AccountNumber,
+		}}); err != nil {
+			return nil, err
+		}
+	case shared.ScheduleMessageTypeTicket:
+		logSchedulerDebug("inserting ticket message", "body_bytes", len(message.RawBody), "description_bytes", len(parsedMessage.Text))
+		if err := w.InsertTicketMessages(ctx, []IncomingMessage{{
+			RawBody:       message.RawBody,
+			AccountNumber: parsedMessage.AccountNumber,
+		}}); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unsupported scheduler message type %q", parsedMessage.MessageType)
 	}
 
 	return w.RunScheduling(ctx)
@@ -326,6 +366,7 @@ func processAlarmChain(ctx context.Context, q *sqlcgen.Queries, chain []sqlcgen.
 		ToSchedule:    true,
 		Text:          newest.RawMessageBody,
 		AccountNumber: newest.AwsAccountNumber,
+		MessageType:   shared.ScheduleMessageTypeIncident,
 	}, true, nil
 }
 
@@ -345,10 +386,17 @@ func scheduleTickets(ctx context.Context, q *sqlcgen.Queries) ([]shared.Schedule
 			return nil, err
 		}
 
+		ticketDecisionText := row.RawMessageBody
+		parsedTicketMessage, err := parseTicketMessageForScheduling(row.RawMessageBody)
+		if err == nil && strings.TrimSpace(parsedTicketMessage.Text) != "" {
+			ticketDecisionText = parsedTicketMessage.Text
+		}
+
 		decisions = append(decisions, shared.ScheduleDecision{
 			ToSchedule:    true,
-			Text:          row.RawMessageBody,
+			Text:          ticketDecisionText,
 			AccountNumber: row.AwsAccountNumber,
+			MessageType:   shared.ScheduleMessageTypeTicket,
 		})
 		logSchedulerDebug("scheduling ticket decision", "account", row.AwsAccountNumber, "ticket_row_id", row.ID)
 	}
@@ -374,4 +422,115 @@ func parseReceivedAt(value string) (time.Time, error) {
 		return t, nil
 	}
 	return time.Parse(time.RFC3339, value)
+}
+
+// parseIncomingMessageForScheduling performs the scheduler-owned message classification for a raw SQS body.
+// It recognizes CloudWatch alarm incidents and ticket payloads, returning only the fields needed to persist the row
+// and build ScheduleDecision text after RunScheduling has decided to start work.
+func parseIncomingMessageForScheduling(rawMessageBody string) (parsedIncomingMessage, error) {
+	if incidentMessage, err := parseIncidentMessageForScheduling(rawMessageBody); err == nil {
+		return incidentMessage, nil
+	}
+	if ticketMessage, err := parseTicketMessageForScheduling(rawMessageBody); err == nil {
+		return ticketMessage, nil
+	}
+
+	return parsedIncomingMessage{}, errors.New("unsupported scheduler message shape")
+}
+
+// parseIncidentMessageForScheduling extracts the minimum CloudWatch EventBridge fields needed by alarm chaining.
+// The scheduler stores the original JSON body, but account number is pulled out here because the alarm table groups
+// chains by account before producing incident decisions.
+func parseIncidentMessageForScheduling(rawMessageBody string) (parsedIncomingMessage, error) {
+	var cloudWatchAlarmMessage struct {
+		Account    string `json:"account"`
+		DetailType string `json:"detail-type"`
+		Source     string `json:"source"`
+	}
+	if err := json.Unmarshal([]byte(rawMessageBody), &cloudWatchAlarmMessage); err != nil {
+		return parsedIncomingMessage{}, err
+	}
+	if cloudWatchAlarmMessage.Source != "aws.cloudwatch" || cloudWatchAlarmMessage.DetailType != "CloudWatch Alarm State Change" {
+		return parsedIncomingMessage{}, errors.New("not a cloudwatch alarm incident")
+	}
+	accountNumber := strings.TrimSpace(cloudWatchAlarmMessage.Account)
+	if accountNumber == "" {
+		return parsedIncomingMessage{}, errors.New("cloudwatch alarm incident is missing account number")
+	}
+
+	return parsedIncomingMessage{
+		MessageType:   shared.ScheduleMessageTypeIncident,
+		Text:          rawMessageBody,
+		AccountNumber: accountNumber,
+	}, nil
+}
+
+// parseTicketMessageForScheduling recognizes the Jira-like ticket shape documented in docs/message-shapes.md.
+// It extracts only description text for the eventual agent prompt while leaving the raw body available in the
+// database for later inspection or richer ticket parsing.
+func parseTicketMessageForScheduling(rawMessageBody string) (parsedIncomingMessage, error) {
+	var ticketMessage struct {
+		ID     string `json:"id"`
+		Key    string `json:"key"`
+		Fields struct {
+			Description json.RawMessage `json:"description"`
+		} `json:"fields"`
+	}
+	if err := json.Unmarshal([]byte(rawMessageBody), &ticketMessage); err != nil {
+		return parsedIncomingMessage{}, err
+	}
+	if strings.TrimSpace(ticketMessage.ID) == "" && strings.TrimSpace(ticketMessage.Key) == "" {
+		return parsedIncomingMessage{}, errors.New("ticket is missing id and key")
+	}
+	descriptionText := ticketDescriptionText(ticketMessage.Fields.Description)
+	if descriptionText == "" {
+		return parsedIncomingMessage{}, errors.New("ticket is missing description text")
+	}
+
+	return parsedIncomingMessage{
+		MessageType: shared.ScheduleMessageTypeTicket,
+		Text:        descriptionText,
+	}, nil
+}
+
+// ticketDescriptionText flattens the ticket description field into prompt text.
+// Jira-style descriptions are nested document JSON, so this walks the structure and joins every "text" field while
+// also accepting a plain string description for simpler test and smoke payloads.
+func ticketDescriptionText(description json.RawMessage) string {
+	if len(description) == 0 {
+		return ""
+	}
+
+	var plainDescription string
+	if err := json.Unmarshal(description, &plainDescription); err == nil {
+		return strings.TrimSpace(plainDescription)
+	}
+
+	var descriptionDocument any
+	if err := json.Unmarshal(description, &descriptionDocument); err != nil {
+		return ""
+	}
+
+	var textParts []string
+	collectTicketDescriptionTextParts(descriptionDocument, &textParts)
+	return strings.TrimSpace(strings.Join(textParts, "\n"))
+}
+
+// collectTicketDescriptionTextParts recursively walks a ticket description document looking for text leaves.
+// It is deliberately small and schema-light because scheduling only needs enough text to start an agent, not a full
+// Jira document renderer.
+func collectTicketDescriptionTextParts(descriptionValue any, textParts *[]string) {
+	switch value := descriptionValue.(type) {
+	case map[string]any:
+		if textValue, ok := value["text"].(string); ok && strings.TrimSpace(textValue) != "" {
+			*textParts = append(*textParts, strings.TrimSpace(textValue))
+		}
+		for _, nestedValue := range value {
+			collectTicketDescriptionTextParts(nestedValue, textParts)
+		}
+	case []any:
+		for _, nestedValue := range value {
+			collectTicketDescriptionTextParts(nestedValue, textParts)
+		}
+	}
 }

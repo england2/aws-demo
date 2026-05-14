@@ -36,35 +36,26 @@ func printSchedulerDecisions(scheduleDecisions []shared.ScheduleDecision) error 
 	return nil
 }
 
-// schedulerIncomingMessageFromPolledSQSMessage adapts the poller's transport shape into the scheduler's DB input.
-// It runs after ParseSQSMessageBody has extracted EventBridge metadata and preserves RawBody as the scheduler's
-// authoritative message text while supplying the account number required by scheduler inserts.
-func schedulerIncomingMessageFromPolledSQSMessage(polledSQSMessage PolledSQSMessage, parsedSQSMessage ParsedSQSMessage) (scheduler.IncomingMessage, error) {
-	if parsedSQSMessage.AccountNumber == nil || strings.TrimSpace(*parsedSQSMessage.AccountNumber) == "" {
-		return scheduler.IncomingMessage{}, fmt.Errorf("sqs message %q is missing aws account number", polledSQSMessage.ExternalMessageID)
-	}
-
+// schedulerIncomingMessageFromPolledSQSMessage adapts the poller's transport shape into the scheduler's raw input.
+// It intentionally does not classify the SQS body; InsertMessageAndRunScheduling owns that boundary so incidents
+// and tickets are interpreted in one scheduler package instead of in main.
+func schedulerIncomingMessageFromPolledSQSMessage(polledSQSMessage PolledSQSMessage) scheduler.IncomingMessage {
 	return scheduler.IncomingMessage{
-		RawBody:       polledSQSMessage.Body,
-		AccountNumber: strings.TrimSpace(*parsedSQSMessage.AccountNumber),
-	}, nil
+		RawBody: polledSQSMessage.Body,
+	}
 }
 
 // insertPolledSQSMessageAndRunScheduler persists one supported SQS delivery and asks the scheduler for decisions.
 // It is called by main_testing after the poller emits a message, and it returns schedule decisions without touching
 // SQS so the top-level polling loop remains responsible for external queue delete ordering.
 func insertPolledSQSMessageAndRunScheduler(ctx context.Context, schedulerWorker *scheduler.Worker, polledSQSMessage PolledSQSMessage) ([]shared.ScheduleDecision, error) {
-	parsedSQSMessage := ParseSQSMessageBody([]byte(polledSQSMessage.Body))
-	switch parsedSQSMessage.MessageType {
-	case MessageTypeCloudWatchAlarm:
-		schedulerIncomingMessage, err := schedulerIncomingMessageFromPolledSQSMessage(polledSQSMessage, parsedSQSMessage)
-		if err != nil {
-			return nil, err
-		}
-		return schedulerWorker.InsertAlarmMessageAndRunScheduling(ctx, schedulerIncomingMessage)
-	default:
-		return nil, fmt.Errorf("unsupported sqs message type %q for message %q", parsedSQSMessage.MessageType, polledSQSMessage.ExternalMessageID)
+	schedulerIncomingMessage := schedulerIncomingMessageFromPolledSQSMessage(polledSQSMessage)
+	scheduleDecisions, err := schedulerWorker.InsertMessageAndRunScheduling(ctx, schedulerIncomingMessage)
+	if err != nil {
+		return nil, fmt.Errorf("schedule sqs message %q: %w", polledSQSMessage.ExternalMessageID, err)
 	}
+
+	return scheduleDecisions, nil
 }
 
 // testSchedulerDatabasePathFromFlags resolves the database path for ad hoc conductor test entry points.

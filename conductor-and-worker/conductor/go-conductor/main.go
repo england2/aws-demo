@@ -386,6 +386,9 @@ func main_testing() {
 				if err := printSchedulerDecisions(scheduleDecisions); err != nil {
 					fmt.Fprintf(os.Stderr, "print scheduler decisions for sqs message %q: %v\n", polledSQSMessage.ExternalMessageID, err)
 				}
+				for _, scheduleDecision := range scheduleDecisions {
+					fmt.Printf("[Conductor] scheduler decision type: %s\n", scheduleDecision.MessageType)
+				}
 
 				// ==== build and spawn a worker ====
 

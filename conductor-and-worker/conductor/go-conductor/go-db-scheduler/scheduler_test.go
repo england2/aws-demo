@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"go-conductor/db-internal/shared"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -27,6 +29,9 @@ func TestRunSchedulingWithExistingAlarmFixture(t *testing.T) {
 	}
 	if decisions[0].AccountNumber != "204772699175" {
 		t.Fatalf("unexpected account number: %q", decisions[0].AccountNumber)
+	}
+	if decisions[0].MessageType != shared.ScheduleMessageTypeIncident {
+		t.Fatalf("unexpected message type: %q", decisions[0].MessageType)
 	}
 	if !strings.Contains(decisions[0].Text, "test-alarm-8") {
 		t.Fatalf("expected newest alarm body in decision text, got %q", decisions[0].Text)
@@ -58,8 +63,23 @@ func TestRunSchedulingWithTicketMessages(t *testing.T) {
 
 	err = worker.InsertTicketMessages(ctx, []IncomingMessage{
 		{
-			RawBody:       `{"ticket":"TICKET-1","summary":"cpu alarm followup"}`,
-			AccountNumber: "204772699175",
+			RawBody: `{
+				"id": "10002",
+				"key": "ENG-123",
+				"fields": {
+					"description": {
+						"type": "doc",
+						"content": [
+							{
+								"type": "paragraph",
+								"content": [
+									{"type": "text", "text": "Investigate failed login timeout."}
+								]
+							}
+						]
+					}
+				}
+			}`,
 		},
 	})
 	if err != nil {
@@ -73,10 +93,10 @@ func TestRunSchedulingWithTicketMessages(t *testing.T) {
 	if len(decisions) != 1 {
 		t.Fatalf("expected 1 ticket decision, got %d", len(decisions))
 	}
-	if decisions[0].AccountNumber != "204772699175" {
-		t.Fatalf("unexpected account number: %q", decisions[0].AccountNumber)
+	if decisions[0].MessageType != shared.ScheduleMessageTypeTicket {
+		t.Fatalf("unexpected message type: %q", decisions[0].MessageType)
 	}
-	if !strings.Contains(decisions[0].Text, "TICKET-1") {
+	if decisions[0].Text != "Investigate failed login timeout." {
 		t.Fatalf("unexpected ticket decision text: %q", decisions[0].Text)
 	}
 
