@@ -84,6 +84,8 @@ jobs:
           cat > /tmp/conductor-ssm-parameters.json <<'EOF'
           {
             "commands": [
+              "cat > /tmp/deploy-conductor-${{ github.sha }}.sh <<'REMOTE_SCRIPT'",
+              "#!/usr/bin/env bash",
               "set -euo pipefail",
               "TMP_DIR=/tmp/conductor-deploy-${{ github.sha }}",
               "rm -rf \"$TMP_DIR\"",
@@ -97,7 +99,10 @@ jobs:
               "sudo install -m 0644 \"$TMP_DIR/docker-compose.conductor.yml\" /home/admin/docker-compose.conductor.yml",
               "bash /home/admin/install-conductor-host.sh",
               "bash /home/admin/deploy-conductor.sh \"${{ steps.image.outputs.image_uri }}\"",
-              "rm -rf \"$TMP_DIR\""
+              "rm -rf \"$TMP_DIR\"",
+              "REMOTE_SCRIPT",
+              "bash /tmp/deploy-conductor-${{ github.sha }}.sh",
+              "rm -f /tmp/deploy-conductor-${{ github.sha }}.sh"
             ]
           }
           EOF
