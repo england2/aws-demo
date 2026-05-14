@@ -11,6 +11,14 @@ resource "aws_security_group" "agent_operation" {
     cidr_blocks = [var.ssh_allowed_cidr]
   }
 
+  ingress {
+    description     = "Conductor gRPC from agent Fargate workers"
+    from_port       = 50055
+    to_port         = 50055
+    protocol        = "tcp"
+    security_groups = [aws_security_group.agent_fargate.id]
+  }
+
   egress {
     from_port   = 0
     to_port     = 0

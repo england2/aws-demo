@@ -1,11 +1,20 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 )
+
+// launchWorkerProcessTestingDocker adapts the local Docker smoke launcher to the registry's launcher shape.
+// The registry calls it after recording the spawn event, while main_real owns choosing this local process path
+// instead of the Fargate launcher used by the SQS scheduler flow.
+func launchWorkerProcessTestingDocker(ctx context.Context, config workerSpawnConfig) error {
+	_, err := execWorkerProcessTestingDocker(config)
+	return err
+}
 
 func execWorkerProcessTestingDocker(config workerSpawnConfig) (*exec.Cmd, error) {
 	spawnDockerWorkerScriptPath, err := filepath.Abs("/home/t/spawn-docker-worker-testing")

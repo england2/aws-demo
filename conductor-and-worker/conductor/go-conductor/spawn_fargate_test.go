@@ -68,7 +68,7 @@ func TestBuildRunTaskInput(t *testing.T) {
 	}
 }
 
-// counter-factural confirmed
+// counterfactual confirmed
 // TestBuildFargateSpawnRequestUsesWorkerIdentityEnvironment verifies the conductor-to-Fargate handoff.
 // It runs after prepareWorkerSpawnConfig would have established the worker ID and confirms Fargate receives only
 // the identity env needed to handshake and request its server-side work files.

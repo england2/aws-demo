@@ -24,6 +24,7 @@ import (
 
 var (
 	serverAddr       = flag.String("addr", "localhost:50055", "The server address in the format of host:port")
+	workerDialAddr   = flag.String("worker-dial-addr", "", "The conductor address workers should dial; defaults to addr")
 	dbLocation       = flag.String("test-db-loc", "", "path to the test database file")
 	debugAlwaysNewDB = flag.Bool("debug_always_new_db", false, "create a fresh sibling scheduler database before polling")
 )
@@ -157,6 +158,7 @@ func main_real() {
 	}
 
 	fmt.Printf("conductor listening address: %s\n", *serverAddr)
+	fmt.Printf("worker dial address: %s\n", conductorWorkerDialAddress())
 	fmt.Printf("conductor run directory: %s\n", runDir)
 
 	listener, err := net.Listen("tcp", *serverAddr)
@@ -190,14 +192,14 @@ func main_real() {
 			Text:        "Manual conductor startup test worker.",
 			MessageType: shared.ScheduleMessageTypeTicket,
 		},
-		ConductorGrpcServerAddr: *serverAddr,
+		ConductorGrpcServerAddr: conductorWorkerDialAddress(),
 		WorkerID:                testWorkerID,
 		RunDir:                  runDir,
 	})
 	if err != nil {
 		log.Fatalf("prepare worker work files: %v", err)
 	}
-	if err := registry.spawnWorker(testWorkerSpawnConfig); err != nil {
+	if err := registry.spawnWorker(context.Background(), testWorkerSpawnConfig, launchWorkerProcessTestingDocker); err != nil {
 		log.Fatalf("spawn worker: %v", err)
 	}
 	// ---- test spawning over ----
@@ -246,6 +248,17 @@ func main_db_testing() {
 	if err := runSchedulerAndPrintDecisions(context.Background(), testSchedulerDatabasePathFromFlags()); err != nil {
 		panic(err)
 	}
+}
+
+// conductorWorkerDialAddress returns the address passed into worker container env.
+// It is intentionally separate from the listen address because AWS workers must dial the EC2 private IP,
+// while the conductor process listens on 0.0.0.0 inside Docker.
+func conductorWorkerDialAddress() string {
+	if strings.TrimSpace(*workerDialAddr) != "" {
+		return *workerDialAddr
+	}
+
+	return *serverAddr
 }
 
 // =============================================================
@@ -323,6 +336,7 @@ func main_testing() {
 	// =============================================================
 
 	fmt.Printf("conductor listening address: %s\n", *serverAddr)
+	fmt.Printf("worker dial address: %s\n", conductorWorkerDialAddress())
 	fmt.Printf("conductor run directory: %s\n", runDir)
 
 	listener, err := net.Listen("tcp", *serverAddr)
@@ -414,7 +428,7 @@ func main_testing() {
 					newWorkerName := util.GenerateWorkerName()
 					newWorkerSpawnConfig, err := prepareWorkerSpawnConfig(workerSpawnConfig{
 						ScheduleDecision:        scheduleDecision,
-						ConductorGrpcServerAddr: *serverAddr,
+						ConductorGrpcServerAddr: conductorWorkerDialAddress(),
 						WorkerID:                newWorkerName,
 						RunDir:                  runDir,
 					})
@@ -422,11 +436,37 @@ func main_testing() {
 						log.Fatalf("prepare worker work files: %v", err)
 					}
 
-					// Add the new worker to the registy.
-					if err := registry.spawnWorker(newWorkerSpawnConfig); err != nil {
+					fargateWorkerSpawnRequest := BuildFargateSpawnRequest(
+						newWorkerSpawnConfig,
+						buildAdhocFargateInfrastructureConfig(),
+					)
+					fmt.Printf(
+						"[Conductor] spawning fargate worker %s for %s\n",
+						newWorkerSpawnConfig.WorkerID,
+						scheduleDecision.MessageType,
+					)
+
+					// Add the new worker to the registry and launch its Fargate task.
+					if err := registry.spawnWorker(
+						pollLoopContext,
+						newWorkerSpawnConfig,
+						func(spawnContext context.Context, launchedWorkerConfig workerSpawnConfig) error {
+							spawnResult, err := Spawn(spawnContext, fargateWorkerSpawnRequest)
+							if err != nil {
+								return err
+							}
+							fmt.Printf(
+								"[Conductor] spawned fargate worker %s task=%s\n",
+								launchedWorkerConfig.WorkerID,
+								spawnResult.TaskARN,
+							)
+							return nil
+						},
+					); err != nil {
 						log.Fatalf("spawn worker: %v", err)
 					}
 
+					// ai--done Fargate launcher is inline here so this call site owns the selected spawn path.
 				}
 
 			case err, ok := <-pollErrors:

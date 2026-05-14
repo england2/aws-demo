@@ -79,7 +79,7 @@ func TestPrepareWorkerWorkFilesZipUsesTicketWorkerResources(t *testing.T) {
 	assertZipFilesMatchWorkerResources(t, zipReader.File, ticketWorkerResourceDir, workerTaskText)
 }
 
-// counter-factural confirmed
+// counterfactual confirmed
 func TestSeedWorkerWorkFilesUsesIncidentWorkerResources(t *testing.T) {
 	workerID := "worker-test-incident"
 	workerTaskText := "Investigate high CPU incident.\n"

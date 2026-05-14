@@ -34,6 +34,46 @@ func TestSchedulerIncomingMessageFromPolledSQSMessagePreservesRawBody(t *testing
 	}
 }
 
+// counterfactual confirmed
+// TestConductorWorkerDialAddressUsesExplicitWorkerDialAddress covers the AWS deployment address split.
+// The conductor listens on all interfaces inside Docker, while spawned Fargate workers receive the private EC2
+// address that reaches the host-published gRPC port.
+func TestConductorWorkerDialAddressUsesExplicitWorkerDialAddress(t *testing.T) {
+	originalServerAddr := *serverAddr
+	originalWorkerDialAddr := *workerDialAddr
+	t.Cleanup(func() {
+		*serverAddr = originalServerAddr
+		*workerDialAddr = originalWorkerDialAddr
+	})
+
+	*serverAddr = "0.0.0.0:50055"
+	*workerDialAddr = "172.31.14.8:50055"
+
+	if got := conductorWorkerDialAddress(); got != "172.31.14.8:50055" {
+		t.Fatalf("conductorWorkerDialAddress() = %q, want private worker dial address", got)
+	}
+}
+
+// counterfactual confirmed
+// TestConductorWorkerDialAddressFallsBackToListenAddress preserves the local smoke-test path.
+// Local Docker workers still use the existing addr flag when no AWS-specific worker dial address has been
+// configured by deployment.
+func TestConductorWorkerDialAddressFallsBackToListenAddress(t *testing.T) {
+	originalServerAddr := *serverAddr
+	originalWorkerDialAddr := *workerDialAddr
+	t.Cleanup(func() {
+		*serverAddr = originalServerAddr
+		*workerDialAddr = originalWorkerDialAddr
+	})
+
+	*serverAddr = "localhost:50055"
+	*workerDialAddr = ""
+
+	if got := conductorWorkerDialAddress(); got != "localhost:50055" {
+		t.Fatalf("conductorWorkerDialAddress() = %q, want listen address fallback", got)
+	}
+}
+
 // TestInsertPolledSQSMessageAndRunSchedulerPersistsSchedulesAndReturnsDecisions exercises the scheduler handoff.
 // It starts with one existing alarm row, inserts the polled CloudWatch message, runs scheduler chaining, and returns
 // decisions to the caller so main_testing can own the later SQS delete.
@@ -119,7 +159,7 @@ func TestInsertPolledSQSMessageAndRunSchedulerRejectsUnsupportedBeforeDelete(t *
 	}
 }
 
-// counter-factural confirmed
+// counterfactual confirmed
 // TestInsertPolledSQSMessageAndRunSchedulerSchedulesTicketDescription covers the ticket polling path.
 // It feeds the documented Jira-style shape through main's scheduler handoff and verifies the returned decision
 // carries ticket type plus flattened description text for later prompt selection.

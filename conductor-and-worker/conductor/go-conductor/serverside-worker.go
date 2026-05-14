@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -167,12 +168,22 @@ func (awr *workerRegistry) getNumActiveWorkers() int {
 	return numActiveWorkers
 }
 
-// ai extra event
+// workerSpawnStartedEvent records the prepared config attached to a registry spawn event.
+// It is written before the launcher starts the worker, so later event inspection can see what identity and
+// work-file directory the conductor intended to launch.
 type workerSpawnStartedEvent struct {
 	Config workerSpawnConfig
 }
 
-func (awr *workerRegistry) spawnWorker(conf workerSpawnConfig) error {
+// workerLauncher is the boundary between registry bookkeeping and the selected spawn mechanism.
+// main passes either the local Docker smoke launcher or a Fargate closure, so spawnWorker can keep one event
+// sequence without knowing how the worker process is started.
+type workerLauncher func(context.Context, workerSpawnConfig) error
+
+// spawnWorker registers one prepared worker and then invokes the caller-selected launcher.
+// It must run after prepareWorkerSpawnConfig has created WorkFilesDir, because worker RPCs may request files as
+// soon as the launcher starts the remote or local worker process.
+func (awr *workerRegistry) spawnWorker(ctx context.Context, conf workerSpawnConfig, launchWorker workerLauncher) error {
 	worker, err := awr.registerSpawnedWorker(conf)
 	if err != nil {
 		return err
@@ -181,7 +192,7 @@ func (awr *workerRegistry) spawnWorker(conf workerSpawnConfig) error {
 		Config: conf,
 	})
 
-	if _, err := execWorkerProcessTestingDocker(conf); err != nil {
+	if err := launchWorker(ctx, conf); err != nil {
 		return err
 	}
 
@@ -218,8 +229,6 @@ const (
 )
 
 type workerEvent int
-
-// workerSpawnConfig contains configuration needed to spawn workers, and is later put in the struct representing an active worker.
 
 func (w *spawnedWorker) recordEvent(kind workerEvent, payload any) {
 	w.mu.Lock()

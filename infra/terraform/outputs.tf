@@ -143,6 +143,11 @@ output "agent_operation_public_dns" {
   value       = aws_instance.agent_operation.public_dns
 }
 
+output "agent_operation_private_ip" {
+  description = "Private IP address workers should use for conductor gRPC inside the VPC."
+  value       = aws_instance.agent_operation.private_ip
+}
+
 output "agent_operation_ssh_command" {
   description = "SSH command for the agent-operation instance."
   value       = "ssh -i /path/to/aws-demo-key.pem admin@${aws_instance.agent_operation.public_ip}"

@@ -35,6 +35,26 @@ type SpawnResult struct {
 	TaskARN string
 }
 
+// buildAdhocFargateInfrastructureConfig returns the current hand-wired ECS target for worker tasks.
+// Main uses it immediately before BuildFargateSpawnRequest, keeping the static cluster/network values separate
+// from per-worker identity env vars.
+func buildAdhocFargateInfrastructureConfig() FargateInfrastructureConfig {
+	return FargateInfrastructureConfig{
+		Region:         "us-west-2",
+		Cluster:        "ecs-cluster-agent-fargate",
+		TaskDefinition: "agent-fargate",
+		ContainerName:  "agent-fargate",
+		Subnets: []string{
+			"subnet-0097cadb66a94a14c",
+			"subnet-0f27d826d1e258387",
+			"subnet-072d05b5920b46b90",
+			"subnet-01d067ffe823ca33c",
+		},
+		SecurityGroups: []string{"sg-0fd8bf9624d0cb702"},
+		AssignPublicIP: true,
+	}
+}
+
 type ecsClient interface {
 	// RunTask is the only ECS operation this package needs for the no-state spawn path.
 	// Spawn calls it after BuildRunTaskInput and AWS client construction have completed, and the returned task
