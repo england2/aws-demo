@@ -404,6 +404,12 @@ func main_testing() {
 				for _, scheduleDecision := range scheduleDecisions {
 					fmt.Printf("[Conductor] scheduler decision type: %s\n", scheduleDecision.MessageType)
 
+					// Ignore non-scheduled messages for now.
+					if !scheduleDecision.ToSchedule {
+						fmt.Printf("[Conductor] scheduler decision type %s does not request spawn\n", scheduleDecision.MessageType)
+						continue
+					}
+
 					// Create a new worker spawn config
 					newWorkerName := util.GenerateWorkerName()
 					newWorkerSpawnConfig, err := prepareWorkerSpawnConfig(workerSpawnConfig{

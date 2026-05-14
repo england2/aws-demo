@@ -13,16 +13,8 @@ import (
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 )
 
-// ai-- collapse?
-// is it possible to collapse these into one struct with flat fields?
-//
-// OR
-// would it be better to have a large holding struct for all of this?
-//
-//
-// ai-- collapse?
-// SpawnConfig is the static ECS infrastructure config needed to run one task.
-type SpawnConfig struct {
+// FargateInfrastructureConfig is the static ECS infrastructure config needed to run one task.
+type FargateInfrastructureConfig struct {
 	Region         string
 	Cluster        string
 	TaskDefinition string
@@ -32,14 +24,12 @@ type SpawnConfig struct {
 	AssignPublicIP bool
 }
 
-// ai-- collapse?
-// SpawnRequest is all caller-provided state for one Fargate task spawn.
-type SpawnRequest struct {
-	Config      SpawnConfig
-	Environment map[string]string
+// FargateWorkerSpawnRequest is all caller-provided state for one Fargate task spawn.
+type FargateWorkerSpawnRequest struct {
+	Infrastructure FargateInfrastructureConfig
+	Environment    map[string]string
 }
 
-// ai-- collapse?
 // SpawnResult is the ECS task identity returned after a successful RunTask call.
 type SpawnResult struct {
 	TaskARN string
@@ -65,16 +55,16 @@ var newECSClient = func(awsConfig aws.Config) ecsClient {
 	return ecs.NewFromConfig(awsConfig)
 }
 
-// Spawn is the package boundary that turns a validated SpawnRequest into one ECS RunTask call.
+// Spawn is the package boundary that turns a validated FargateWorkerSpawnRequest into one ECS RunTask call.
 // Callers must establish config and environment first; Spawn builds the ECS input, loads AWS config for the
 // request region, and returns only the task ARN needed by the conductor log/delete path.
-func Spawn(ctx context.Context, request SpawnRequest) (SpawnResult, error) {
+func Spawn(ctx context.Context, request FargateWorkerSpawnRequest) (SpawnResult, error) {
 	input, err := BuildRunTaskInput(request)
 	if err != nil {
 		return SpawnResult{}, err
 	}
 
-	awsConfig, err := loadAWSConfig(ctx, request.Config.Region)
+	awsConfig, err := loadAWSConfig(ctx, request.Infrastructure.Region)
 	if err != nil {
 		return SpawnResult{}, fmt.Errorf("load AWS config for Fargate spawn: %w", err)
 	}
@@ -98,16 +88,31 @@ func Spawn(ctx context.Context, request SpawnRequest) (SpawnResult, error) {
 	return SpawnResult{TaskARN: taskARN}, nil
 }
 
+// BuildFargateSpawnRequest creates the ECS spawn request for one prepared conductor worker.
+// Main calls it after prepareWorkerSpawnConfig has created WorkFilesDir, keeping worker identity visible before
+// passing the request to Spawn.
+func BuildFargateSpawnRequest(workerConfig workerSpawnConfig, fargateConfig FargateInfrastructureConfig) FargateWorkerSpawnRequest {
+	environment := map[string]string{
+		"CONDUCTOR_GRPC_SERVER_ADDR": workerConfig.ConductorGrpcServerAddr,
+		"WORKER_ID":                  workerConfig.WorkerID,
+	}
+
+	return FargateWorkerSpawnRequest{
+		Infrastructure: fargateConfig,
+		Environment:    WithDebugSSHEnvironment(environment),
+	}
+}
+
 // BuildRunTaskInput converts static ECS config plus container env into the exact RunTask payload.
 // Spawn calls it before AWS credentials are loaded, and tests call it directly to lock request shape without
 // reaching ECS.
-func BuildRunTaskInput(request SpawnRequest) (*ecs.RunTaskInput, error) {
+func BuildRunTaskInput(request FargateWorkerSpawnRequest) (*ecs.RunTaskInput, error) {
 	if err := validateSpawnRequest(request); err != nil {
 		return nil, err
 	}
 
 	assignPublicIP := ecstypes.AssignPublicIpDisabled
-	if request.Config.AssignPublicIP {
+	if request.Infrastructure.AssignPublicIP {
 		assignPublicIP = ecstypes.AssignPublicIpEnabled
 	}
 
@@ -125,8 +130,8 @@ func BuildRunTaskInput(request SpawnRequest) (*ecs.RunTaskInput, error) {
 	}
 
 	return &ecs.RunTaskInput{
-		Cluster:        aws.String(request.Config.Cluster),
-		TaskDefinition: aws.String(request.Config.TaskDefinition),
+		Cluster:        aws.String(request.Infrastructure.Cluster),
+		TaskDefinition: aws.String(request.Infrastructure.TaskDefinition),
 		LaunchType:     ecstypes.LaunchTypeFargate,
 		Count:          aws.Int32(1),
 		StartedBy:      aws.String("agent-conductor"),
@@ -134,14 +139,14 @@ func BuildRunTaskInput(request SpawnRequest) (*ecs.RunTaskInput, error) {
 		EnableExecuteCommand: true,
 		NetworkConfiguration: &ecstypes.NetworkConfiguration{
 			AwsvpcConfiguration: &ecstypes.AwsVpcConfiguration{
-				Subnets:        request.Config.Subnets,
-				SecurityGroups: request.Config.SecurityGroups,
+				Subnets:        request.Infrastructure.Subnets,
+				SecurityGroups: request.Infrastructure.SecurityGroups,
 				AssignPublicIp: assignPublicIP,
 			},
 		},
 		Overrides: &ecstypes.TaskOverride{
 			ContainerOverrides: []ecstypes.ContainerOverride{{
-				Name:        aws.String(request.Config.ContainerName),
+				Name:        aws.String(request.Infrastructure.ContainerName),
 				Environment: environment,
 			}},
 		},
@@ -150,7 +155,7 @@ func BuildRunTaskInput(request SpawnRequest) (*ecs.RunTaskInput, error) {
 }
 
 // WithDebugSSHEnvironment copies the caller's container env and appends debug SSH settings when enabled.
-// HandleSQSMessage and the smoke entrypoint call it after AGENT_NAME and AGENT_PROMPT are established, so the
+// BuildFargateSpawnRequest calls it after worker identity env vars are established, so the
 // final map can flow unchanged into BuildRunTaskInput.
 func WithDebugSSHEnvironment(environment map[string]string) map[string]string {
 	next := make(map[string]string, len(environment)+2)
@@ -172,16 +177,16 @@ func WithDebugSSHEnvironment(environment map[string]string) map[string]string {
 }
 
 // validateSpawnRequest fails before ECS input construction when required infrastructure or runtime env is absent.
-// BuildRunTaskInput calls it first so missing queue-derived prompt data or adhoc cluster config cannot reach
-// fargate.Spawn's AWS RunTask call.
-func validateSpawnRequest(request SpawnRequest) error {
+// BuildRunTaskInput calls it first so missing worker identity data or adhoc cluster config cannot reach
+// Spawn's AWS RunTask call.
+func validateSpawnRequest(request FargateWorkerSpawnRequest) error {
 	required := map[string]string{
-		"Region":         request.Config.Region,
-		"Cluster":        request.Config.Cluster,
-		"TaskDefinition": request.Config.TaskDefinition,
-		"ContainerName":  request.Config.ContainerName,
-		"AGENT_NAME":     request.Environment["AGENT_NAME"],
-		"AGENT_PROMPT":   request.Environment["AGENT_PROMPT"],
+		"Region":                     request.Infrastructure.Region,
+		"Cluster":                    request.Infrastructure.Cluster,
+		"TaskDefinition":             request.Infrastructure.TaskDefinition,
+		"ContainerName":              request.Infrastructure.ContainerName,
+		"CONDUCTOR_GRPC_SERVER_ADDR": request.Environment["CONDUCTOR_GRPC_SERVER_ADDR"],
+		"WORKER_ID":                  request.Environment["WORKER_ID"],
 	}
 
 	var missing []string
@@ -190,10 +195,10 @@ func validateSpawnRequest(request SpawnRequest) error {
 			missing = append(missing, name)
 		}
 	}
-	if len(request.Config.Subnets) == 0 {
+	if len(request.Infrastructure.Subnets) == 0 {
 		missing = append(missing, "Subnets")
 	}
-	if len(request.Config.SecurityGroups) == 0 {
+	if len(request.Infrastructure.SecurityGroups) == 0 {
 		missing = append(missing, "SecurityGroups")
 	}
 	if len(missing) > 0 {

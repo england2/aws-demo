@@ -119,6 +119,7 @@ func TestInsertPolledSQSMessageAndRunSchedulerRejectsUnsupportedBeforeDelete(t *
 	}
 }
 
+// counter-factural confirmed
 // TestInsertPolledSQSMessageAndRunSchedulerSchedulesTicketDescription covers the ticket polling path.
 // It feeds the documented Jira-style shape through main's scheduler handoff and verifies the returned decision
 // carries ticket type plus flattened description text for later prompt selection.

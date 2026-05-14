@@ -11,7 +11,7 @@ import (
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 )
 
-// TestBuildRunTaskInput verifies that a complete SpawnRequest turns into the ECS request shape expected by RunTask.
+// TestBuildRunTaskInput verifies that a complete FargateWorkerSpawnRequest turns into the ECS request shape expected by RunTask.
 // It sits downstream of validSpawnRequest and upstream of Spawn, checking the config and environment mapping without
 // loading AWS credentials or calling ECS.
 func TestBuildRunTaskInput(t *testing.T) {
@@ -60,11 +60,35 @@ func TestBuildRunTaskInput(t *testing.T) {
 		t.Fatalf("ContainerOverride.Name = %q", aws.ToString(containerOverride.Name))
 	}
 	gotEnvironment := environmentMap(containerOverride.Environment)
-	if gotEnvironment["AGENT_NAME"] != "agent-fargate-codex" {
-		t.Fatalf("AGENT_NAME = %q", gotEnvironment["AGENT_NAME"])
+	if gotEnvironment["CONDUCTOR_GRPC_SERVER_ADDR"] != "localhost:50055" {
+		t.Fatalf("CONDUCTOR_GRPC_SERVER_ADDR = %q", gotEnvironment["CONDUCTOR_GRPC_SERVER_ADDR"])
 	}
-	if gotEnvironment["AGENT_PROMPT"] != "do work" {
-		t.Fatalf("AGENT_PROMPT = %q", gotEnvironment["AGENT_PROMPT"])
+	if gotEnvironment["WORKER_ID"] != "worker-test" {
+		t.Fatalf("WORKER_ID = %q", gotEnvironment["WORKER_ID"])
+	}
+}
+
+// counter-factural confirmed
+// TestBuildFargateSpawnRequestUsesWorkerIdentityEnvironment verifies the conductor-to-Fargate handoff.
+// It runs after prepareWorkerSpawnConfig would have established the worker ID and confirms Fargate receives only
+// the identity env needed to handshake and request its server-side work files.
+func TestBuildFargateSpawnRequestUsesWorkerIdentityEnvironment(t *testing.T) {
+	request := BuildFargateSpawnRequest(workerSpawnConfig{
+		ConductorGrpcServerAddr: "localhost:50055",
+		WorkerID:                "worker-test",
+	}, validSpawnConfig())
+
+	if request.Infrastructure.Cluster != "ecs-cluster-agent-fargate" {
+		t.Fatalf("Cluster = %q", request.Infrastructure.Cluster)
+	}
+	if request.Environment["CONDUCTOR_GRPC_SERVER_ADDR"] != "localhost:50055" {
+		t.Fatalf("CONDUCTOR_GRPC_SERVER_ADDR = %q", request.Environment["CONDUCTOR_GRPC_SERVER_ADDR"])
+	}
+	if request.Environment["WORKER_ID"] != "worker-test" {
+		t.Fatalf("WORKER_ID = %q", request.Environment["WORKER_ID"])
+	}
+	if _, ok := request.Environment["AGENT_PROMPT"]; ok {
+		t.Fatalf("AGENT_PROMPT should not be passed to Fargate worker env")
 	}
 }
 
@@ -76,8 +100,8 @@ func TestWithDebugSSHEnvironment(t *testing.T) {
 	t.Setenv("DEBUG_SSH_PUBLIC_KEY_SECRET_NAME", "debug_public_ssh_key")
 
 	environment := WithDebugSSHEnvironment(map[string]string{
-		"AGENT_NAME":   "agent-fargate-codex",
-		"AGENT_PROMPT": "do work",
+		"CONDUCTOR_GRPC_SERVER_ADDR": "localhost:50055",
+		"WORKER_ID":                  "worker-test",
 	})
 
 	if environment["DEBUG_SSH_ENABLED"] != "true" {
@@ -88,7 +112,7 @@ func TestWithDebugSSHEnvironment(t *testing.T) {
 	}
 }
 
-// TestSpawnReturnsTaskARN covers the successful end-to-end package flow from SpawnRequest to returned ECS task ARN.
+// TestSpawnReturnsTaskARN covers the successful end-to-end package flow from FargateWorkerSpawnRequest to returned ECS task ARN.
 // It installs fake AWS/ECS constructors before calling Spawn, so the test observes the RunTask input that would later
 // let the conductor delete the handled SQS receipt.
 func TestSpawnReturnsTaskARN(t *testing.T) {
@@ -197,21 +221,25 @@ func installSpawnTestDoubles(t *testing.T, fakeECS *fakeECSClient, wantRegion st
 // validSpawnRequest builds the smallest complete request accepted by validateSpawnRequest.
 // Tests feed it into BuildRunTaskInput and Spawn so assertions focus on one behavior at a time instead of repeating
 // static ECS config and base worker environment setup.
-func validSpawnRequest() SpawnRequest {
-	return SpawnRequest{
-		Config: SpawnConfig{
-			Region:         "us-west-2",
-			Cluster:        "ecs-cluster-agent-fargate",
-			TaskDefinition: "agent-fargate",
-			ContainerName:  "agent-fargate",
-			Subnets:        []string{"subnet-1"},
-			SecurityGroups: []string{"sg-1"},
-			AssignPublicIP: true,
-		},
+func validSpawnRequest() FargateWorkerSpawnRequest {
+	return FargateWorkerSpawnRequest{
+		Infrastructure: validSpawnConfig(),
 		Environment: map[string]string{
-			"AGENT_NAME":   "agent-fargate-codex",
-			"AGENT_PROMPT": "do work",
+			"CONDUCTOR_GRPC_SERVER_ADDR": "localhost:50055",
+			"WORKER_ID":                  "worker-test",
 		},
+	}
+}
+
+func validSpawnConfig() FargateInfrastructureConfig {
+	return FargateInfrastructureConfig{
+		Region:         "us-west-2",
+		Cluster:        "ecs-cluster-agent-fargate",
+		TaskDefinition: "agent-fargate",
+		ContainerName:  "agent-fargate",
+		Subnets:        []string{"subnet-1"},
+		SecurityGroups: []string{"sg-1"},
+		AssignPublicIP: true,
 	}
 }
 
@@ -236,7 +264,7 @@ func (client *fakeECSClient) RunTask(ctx context.Context, input *ecs.RunTaskInpu
 }
 
 // environmentMap converts ECS container environment pairs back into a lookup table for request assertions.
-// Tests call it after BuildRunTaskInput has serialized SpawnRequest.Environment, making env dataflow readable
+// Tests call it after BuildRunTaskInput has serialized FargateWorkerSpawnRequest.Environment, making env dataflow readable
 // without depending on slice ordering.
 func environmentMap(environment []ecstypes.KeyValuePair) map[string]string {
 	got := make(map[string]string, len(environment))
