@@ -23,10 +23,12 @@ def update_jira_dates(value, timestamp: str) -> None:
             update_jira_dates(item, timestamp)
 
 
-def build_message(script_dir: Path) -> str:
+def build_message(script_dir: Path, ticket_text: str) -> str:
     template_path = script_dir / "message-templates" / "jira.json"
     issue = json.loads(template_path.read_text())
     fields = issue["fields"]
+    fields["summary"] = ticket_text.splitlines()[0][:120]
+    fields["description"]["content"][0]["content"][0]["text"] = ticket_text
 
     now = jira_time(datetime.now(UTC))
     fields["created"] = now
@@ -37,8 +39,12 @@ def build_message(script_dir: Path) -> str:
 
 
 def main() -> int:
+    if len(sys.argv) < 2:
+        print("usage: push-jira-ticket.py <ticket text>", file=sys.stderr)
+        return 2
+
     script_dir = Path(__file__).resolve().parent
-    text = build_message(script_dir)
+    text = build_message(script_dir, sys.argv[1])
 
     subprocess.run(
         [sys.executable, str(script_dir / "push-sqs-message.py"), text],
