@@ -5,6 +5,10 @@ services:
     restart: "no"
     ports:
       - "50055:50055"
+    command:
+      - "-addr=0.0.0.0:50055"
+      - "-worker-dial-addr=${CONDUCTOR_WORKER_DIAL_ADDR}"
+      - "-test-db-loc=/conductor/data/scheduler.sqlite"
     volumes:
       - /conductor:/conductor
     environment:

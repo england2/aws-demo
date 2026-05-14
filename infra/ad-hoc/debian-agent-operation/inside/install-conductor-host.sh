@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 sudo apt update
-sudo apt install -y ca-certificates awscli
+sudo apt install -y ca-certificates awscli curl
 
 if ! command -v docker >/dev/null 2>&1; then
   bash "${SCRIPT_DIR}/install-docker.sh"

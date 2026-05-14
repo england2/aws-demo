@@ -26,6 +26,11 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! command -v curl >/dev/null 2>&1; then
+  echo "curl is required on the host to read the EC2 private IP"
+  exit 1
+fi
+
 if [ ! -f "$COMPOSE_FILE" ]; then
   echo "missing $COMPOSE_FILE"
   exit 1
@@ -36,8 +41,13 @@ sudo chown -R admin:admin /conductor
 
 aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$REGISTRY"
 
+IMDS_TOKEN="$(curl -fsS -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")"
+INSTANCE_PRIVATE_IP="$(curl -fsS -H "X-aws-ec2-metadata-token: ${IMDS_TOKEN}" "http://169.254.169.254/latest/meta-data/local-ipv4")"
+CONDUCTOR_WORKER_DIAL_ADDR="${CONDUCTOR_WORKER_DIAL_ADDR:-${INSTANCE_PRIVATE_IP}:50055}"
+
 cat > "$ENV_FILE" <<EOF
 CONDUCTOR_IMAGE=${CONDUCTOR_IMAGE}
+CONDUCTOR_WORKER_DIAL_ADDR=${CONDUCTOR_WORKER_DIAL_ADDR}
 EOF
 
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull conductor
@@ -51,6 +61,7 @@ if [ "$(docker inspect -f '{{.State.Running}}' conductor)" != "true" ]; then
 fi
 
 echo "conductor deployed: ${CONDUCTOR_IMAGE}"
+echo "worker dial address: ${CONDUCTOR_WORKER_DIAL_ADDR}"
 echo "inspect with:"
 echo "  docker logs -f conductor"
 echo "  docker exec -it conductor /bin/bash"
