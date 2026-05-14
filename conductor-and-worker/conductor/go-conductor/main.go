@@ -13,7 +13,6 @@ import (
 	"time"
 
 	sharedproto "conductor-testing/proto"
-	"go-conductor/db-internal/shared"
 	scheduler "go-conductor/go-db-scheduler"
 	util "go-conductor/util"
 
@@ -46,30 +45,6 @@ type conductorServer struct {
 // WorkerIdentity so the handler can attach work to the conductor's in-memory representation of the
 // worker that sent it.
 //
-
-func (s *conductorServer) WorkerStartsTest(ctx context.Context, msg *sharedproto.Test) (*sharedproto.TestResponse, error) {
-	workerID, err := workerIDFromIdentity(msg.GetWorker())
-	if err != nil {
-		return nil, err
-	}
-
-	worker, ok := s.registry.getWorker(workerID)
-	if !ok {
-		return nil, status.Errorf(codes.FailedPrecondition, "worker %q was not spawned by conductor", workerID)
-	}
-	if !worker.didHandshakeSucceed() {
-		return nil, status.Errorf(codes.FailedPrecondition, "worker %q has not completed handshake", workerID)
-	}
-
-	worker.recordEvent(WorkerEventStartsTest, msg)
-
-	printWorkerMessage(worker.ID, msg.GetWorkerMessage())
-
-	return &sharedproto.TestResponse{
-		Worker:        msg.GetWorker(),
-		WorkerMessage: fmt.Sprintf("Conductor: I got your message %s", msg.GetWorkerMessage()),
-	}, nil
-}
 
 func (s *conductorServer) WorkerStartsHandshake(ctx context.Context, msg *sharedproto.Handshake) (*sharedproto.HandshakeResponse, error) {
 	workerID, err := workerIDFromIdentity(msg.GetWorker())
@@ -141,114 +116,8 @@ const (
 
 var isGlobalShutdownOkay bool
 
-func main_real() {
-	flag.Parse()
-
-	// build runtime and shutdown files
-	runDir := filepath.Join(conductorRootPath, conductorRunDirName)
-	if err := os.MkdirAll(runDir, 0o755); err != nil {
-		log.Fatalf("create run dir: %v", err)
-	}
-	shutdownOkayPath := filepath.Join(runDir, conductorShuttingDown)
-	if err := os.Remove(shutdownOkayPath); err != nil && !os.IsNotExist(err) {
-		log.Fatalf("remove old shutdown file: %v", err)
-	}
-	if err := os.WriteFile(shutdownOkayPath, []byte("false\n"), 0o644); err != nil {
-		log.Fatalf("initialize shutdown file: %v", err)
-	}
-
-	fmt.Printf("conductor listening address: %s\n", *serverAddr)
-	fmt.Printf("worker dial address: %s\n", conductorWorkerDialAddress())
-	fmt.Printf("conductor run directory: %s\n", runDir)
-
-	listener, err := net.Listen("tcp", *serverAddr)
-	if err != nil {
-		log.Fatalf("listen: %v", err)
-	}
-
-	// The conductor's gRPC server invokes our server-side RPC methods without giving us a
-	// convenient client identity. Each worker request carries worker_id in the protobuf payload,
-	// and the registry maps that ID to the conductor's in-memory worker representation (that is, an
-	// instance the `spawnedWorker` struct).
-	registry := newWorkerRegistry()
-	conductorServiceImplementation := &conductorServer{
-		registry: registry,
-	}
-
-	grpcServer := grpc.NewServer()
-	sharedproto.RegisterWorkerEventReceiverServiceServer(grpcServer, conductorServiceImplementation)
-
-	go func() {
-		if err := grpcServer.Serve(listener); err != nil {
-			log.Fatalf("serve: %v", err)
-		}
-	}()
-
-	// ---- test spawning ----
-	testWorkerID := util.GenerateWorkerName()
-	testWorkerSpawnConfig, err := prepareWorkerSpawnConfig(workerSpawnConfig{
-		ScheduleDecision: shared.ScheduleDecision{
-			ToSchedule:  true,
-			Text:        "Manual conductor startup test worker.",
-			MessageType: shared.ScheduleMessageTypeTicket,
-		},
-		ConductorGrpcServerAddr: conductorWorkerDialAddress(),
-		WorkerID:                testWorkerID,
-		RunDir:                  runDir,
-	})
-	if err != nil {
-		log.Fatalf("prepare worker work files: %v", err)
-	}
-	if err := registry.spawnWorker(context.Background(), testWorkerSpawnConfig, launchWorkerProcessTestingDocker); err != nil {
-		log.Fatalf("spawn worker: %v", err)
-	}
-	// ---- test spawning over ----
-
-	// Safe shutdown gate.
-	var numActiveWorkers int
-	for {
-		time.Sleep(5 * time.Second)
-
-		shutdownOkayBytes, err := os.ReadFile(shutdownOkayPath)
-		if err != nil {
-			log.Fatalf("read shutdown file: %v", err)
-		}
-
-		isShutdownOkay, err := strconv.ParseBool(strings.TrimSpace(string(shutdownOkayBytes)))
-		if err != nil {
-			log.Fatalf("parse shutdown file: %v", err)
-		}
-
-		if isShutdownOkay {
-			numActiveWorkers = registry.getNumActiveWorkers()
-			fmt.Printf("SHUTDOWN_OKAY is true, waiting for %d workers to finish", numActiveWorkers)
-		} else {
-			continue
-		}
-
-		if isShutdownOkay && numActiveWorkers == 0 {
-			break
-		}
-
-	}
-
-	// Writes `CONDUCTOR_READY_FOR_SAFE_SHUTDOWN`, which the CI waits to exit
-	// Also ensure that the CI deployment waiter also waits on `pgrep -f '^/usr/local/bin/go-conductor$'` to have a non-zero exit code.
-	safeShutdownSucceededPath := filepath.Join(runDir, "CONDUCTOR_READY_FOR_SAFE_SHUTDOWN")
-	if err := os.WriteFile(safeShutdownSucceededPath, []byte("true\n"), 0o644); err != nil {
-		log.Fatalf("write safe shutdown succeeded file: %v", err)
-	}
-}
 
 // temporary reference function showing how to use the scheduler package
-func main_db_testing() {
-	flag.Parse()
-
-	// Showing decisions before a new message is added.
-	if err := runSchedulerAndPrintDecisions(context.Background(), testSchedulerDatabasePathFromFlags()); err != nil {
-		panic(err)
-	}
-}
 
 // conductorWorkerDialAddress returns the address passed into worker container env.
 // It is intentionally separate from the listen address because AWS workers must dial the EC2 private IP,
@@ -261,18 +130,8 @@ func conductorWorkerDialAddress() string {
 	return *serverAddr
 }
 
-// =============================================================
-// MAIN TESTING FUNCTIONS
-// =============================================================
-
+// FIXME: 252 LoC in main, surely we can do better!
 func main() {
-	main_testing()
-}
-
-// main_testing wires the local smoke-test conductor path: DB-backed scheduler plus live SQS polling.
-// It starts after flags provide the scheduler DB path, then each polled SQS message is inserted, scheduled,
-// printed, and deleted from SQS only after the scheduler accepts it.
-func main_testing() {
 	// =============================================================
 	// Runtime path, Files, and Args
 	// =============================================================

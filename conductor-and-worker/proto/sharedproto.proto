@@ -34,20 +34,6 @@ message CodexError {
   string worker_message = 2;
 }
 
-
-// ---- Client/Server Message Pairs  ---------------------------
-
-message Test {
-  WorkerIdentity worker = 1;
-  string worker_message = 2;
-}
-message TestResponse {
-  WorkerIdentity worker = 1;
-  string worker_message = 2;
-}
-
-// ----------------------------
-
 message Shutdown {
   WorkerIdentity worker = 1;
   string worker_message = 2;
@@ -66,7 +52,6 @@ message HandshakeResponse {
 
 // ---- conductor gRPC service  --------------------------------
 service WorkerEventReceiverService {
-  rpc WorkerStartsTest(Test) returns (TestResponse);
   rpc WorkerStartsHandshake(Handshake) returns (HandshakeResponse);
   rpc WorkerStartsShutdown(Shutdown) returns (GeneralResponse);
   rpc WorkerRequestsWorkFiles(FileTransferRequest) returns (stream FileTransferChunk);

@@ -19,7 +19,6 @@ import (
 const _ = grpc.SupportPackageIsVersion8
 
 const (
-	WorkerEventReceiverService_WorkerStartsTest_FullMethodName        = "/sharedproto.WorkerEventReceiverService/WorkerStartsTest"
 	WorkerEventReceiverService_WorkerStartsHandshake_FullMethodName   = "/sharedproto.WorkerEventReceiverService/WorkerStartsHandshake"
 	WorkerEventReceiverService_WorkerStartsShutdown_FullMethodName    = "/sharedproto.WorkerEventReceiverService/WorkerStartsShutdown"
 	WorkerEventReceiverService_WorkerRequestsWorkFiles_FullMethodName = "/sharedproto.WorkerEventReceiverService/WorkerRequestsWorkFiles"
@@ -31,7 +30,6 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type WorkerEventReceiverServiceClient interface {
-	WorkerStartsTest(ctx context.Context, in *Test, opts ...grpc.CallOption) (*TestResponse, error)
 	WorkerStartsHandshake(ctx context.Context, in *Handshake, opts ...grpc.CallOption) (*HandshakeResponse, error)
 	WorkerStartsShutdown(ctx context.Context, in *Shutdown, opts ...grpc.CallOption) (*GeneralResponse, error)
 	WorkerRequestsWorkFiles(ctx context.Context, in *FileTransferRequest, opts ...grpc.CallOption) (WorkerEventReceiverService_WorkerRequestsWorkFilesClient, error)
@@ -45,16 +43,6 @@ type workerEventReceiverServiceClient struct {
 
 func NewWorkerEventReceiverServiceClient(cc grpc.ClientConnInterface) WorkerEventReceiverServiceClient {
 	return &workerEventReceiverServiceClient{cc}
-}
-
-func (c *workerEventReceiverServiceClient) WorkerStartsTest(ctx context.Context, in *Test, opts ...grpc.CallOption) (*TestResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(TestResponse)
-	err := c.cc.Invoke(ctx, WorkerEventReceiverService_WorkerStartsTest_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (c *workerEventReceiverServiceClient) WorkerStartsHandshake(ctx context.Context, in *Handshake, opts ...grpc.CallOption) (*HandshakeResponse, error) {
@@ -159,7 +147,6 @@ func (c *workerEventReceiverServiceClient) WorkerSendsCodexError(ctx context.Con
 // All implementations must embed UnimplementedWorkerEventReceiverServiceServer
 // for forward compatibility
 type WorkerEventReceiverServiceServer interface {
-	WorkerStartsTest(context.Context, *Test) (*TestResponse, error)
 	WorkerStartsHandshake(context.Context, *Handshake) (*HandshakeResponse, error)
 	WorkerStartsShutdown(context.Context, *Shutdown) (*GeneralResponse, error)
 	WorkerRequestsWorkFiles(*FileTransferRequest, WorkerEventReceiverService_WorkerRequestsWorkFilesServer) error
@@ -172,9 +159,6 @@ type WorkerEventReceiverServiceServer interface {
 type UnimplementedWorkerEventReceiverServiceServer struct {
 }
 
-func (UnimplementedWorkerEventReceiverServiceServer) WorkerStartsTest(context.Context, *Test) (*TestResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method WorkerStartsTest not implemented")
-}
 func (UnimplementedWorkerEventReceiverServiceServer) WorkerStartsHandshake(context.Context, *Handshake) (*HandshakeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method WorkerStartsHandshake not implemented")
 }
@@ -202,24 +186,6 @@ type UnsafeWorkerEventReceiverServiceServer interface {
 
 func RegisterWorkerEventReceiverServiceServer(s grpc.ServiceRegistrar, srv WorkerEventReceiverServiceServer) {
 	s.RegisterService(&WorkerEventReceiverService_ServiceDesc, srv)
-}
-
-func _WorkerEventReceiverService_WorkerStartsTest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Test)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(WorkerEventReceiverServiceServer).WorkerStartsTest(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: WorkerEventReceiverService_WorkerStartsTest_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(WorkerEventReceiverServiceServer).WorkerStartsTest(ctx, req.(*Test))
-	}
-	return interceptor(ctx, in, info, handler)
 }
 
 func _WorkerEventReceiverService_WorkerStartsHandshake_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -330,10 +296,6 @@ var WorkerEventReceiverService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "sharedproto.WorkerEventReceiverService",
 	HandlerType: (*WorkerEventReceiverServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "WorkerStartsTest",
-			Handler:    _WorkerEventReceiverService_WorkerStartsTest_Handler,
-		},
 		{
 			MethodName: "WorkerStartsHandshake",
 			Handler:    _WorkerEventReceiverService_WorkerStartsHandshake_Handler,

@@ -25,10 +25,6 @@ type testWorkerEventReceiverClient struct {
 	codexErrorErr               error
 }
 
-func (client *testWorkerEventReceiverClient) WorkerStartsTest(context.Context, *sharedproto.Test, ...grpc.CallOption) (*sharedproto.TestResponse, error) {
-	return nil, nil
-}
-
 func (client *testWorkerEventReceiverClient) WorkerStartsHandshake(context.Context, *sharedproto.Handshake, ...grpc.CallOption) (*sharedproto.HandshakeResponse, error) {
 	return nil, nil
 }
