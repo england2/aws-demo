@@ -1,3 +1,5 @@
+You are an incident response agent. You are to investigate the task provided in TASK.md as your primary job.
+
 # Main task
 You are a ticket worker agent. You are to investigate the task provided in TASK.md as your primary job.
 
