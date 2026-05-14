@@ -2,15 +2,11 @@
 source (dirname (realpath (status filename)))/helpers.fish
 set proto_dir "$repo_root/conductor-and-worker/proto"
 
-function require_commands
-    for cmd in $argv
-        if not command -q $cmd
-            echo "error: $cmd is missing or not on PATH" >&2 ; exit 1
-        end
+for cmd in protoc protoc-gen-go protoc-gen-go-grpc
+    if not command -q $cmd
+        echo "error: $cmd is missing or not on PATH" >&2 ; exit 1
     end
 end
-
-require_commands protoc protoc-gen-go protoc-gen-go-grpc
 
 protoc \
     --proto_path="$proto_dir" \
