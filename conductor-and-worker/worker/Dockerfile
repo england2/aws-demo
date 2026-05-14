@@ -37,6 +37,7 @@ RUN mkdir -p /tmp/agent-meta /worker/work && \
         ca-certificates \
         curl \
         fd-find \
+        fish \
         file \
         gh \
         git \
@@ -68,8 +69,10 @@ COPY --from=build /out/worker /usr/local/bin/worker
 COPY --from=build /out/get-secrets /usr/local/bin/get-secrets
 # Doesn't dropping in a `.codex` doesn't fix EOF sdk init error.
 # COPY conductor-and-worker/worker/docker-resources/.codex/ /root/.codex/
-COPY conductor-and-worker/worker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY conductor-and-worker/worker/docker-resources/inside/entrypoint.sh /entrypoint.sh
+COPY conductor-and-worker/worker/docker-resources/inside/clone-repo.sh /usr/local/bin/clone-repo.sh
+
+RUN chmod +x /entrypoint.sh /usr/local/bin/clone-repo.sh
 
 # real
 # ENTRYPOINT ["/usr/local/bin/worker"]

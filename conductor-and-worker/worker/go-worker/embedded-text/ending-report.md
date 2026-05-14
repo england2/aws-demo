@@ -34,16 +34,16 @@ Positive outcomes may be mentioned, but the report should prioritize headaches, 
    - If the job succeeded cleanly and there were no meaningful frictions, keep the report short.
    - Do not inflate the report with routine implementation details.
 
-## Recommended Structure
+## REQUIRED REPORT STRUCTURE
 
-Use the following structure unless the surrounding system requires a different format.
+Use the exact report structure below.
 
 ```markdown
 # Final Report
 
 ## Outcome
 
-State whether the task succeeded, partially succeeded, failed, or was not attempted.
+State whether the task succeeded or failed.
 
 ## Work Completed
 
@@ -64,9 +64,13 @@ State what checks were run and what their results were. If checks were skipped, 
 ## Remaining Risks or Follow-Ups
 
 List unresolved problems, assumptions, incomplete work, fragile areas, or anything a human should inspect next.
+
+## Additional Notes
+
+Any other useful information that doesn't fit into the above category.
 ```
 
-## What to Capture
+# What to Capture
 
 Include relevant details from the agent's execution, especially:
 
@@ -139,3 +143,5 @@ The report command is the final action before shutdown. The report must capture 
 # Output 
 
 Place your report in /worker/work/agent-meta/ending-report.md
+
+Before finishing, confirm that /worker/work/agent-meta/WAS_JOB_SUCCESSFUL accurately contains `true` or `false`.

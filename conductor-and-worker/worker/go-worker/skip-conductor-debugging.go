@@ -7,13 +7,9 @@ import (
 	"os"
 
 	codex "github.com/pmenglund/codex-sdk-go"
-	"github.com/pmenglund/codex-sdk-go/protocol"
 )
 
-func skipConductor() {
-	// ctx is the Go cancellation/deadline context for SDK calls. It is not the
-	// Codex conversation context.
-	ctx := context.Background()
+func startSkipConductorDebuggingThread(ctx context.Context) (*codex.Codex, *codex.Thread, error) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	// The client owns the connection to the `codex app-server` process. These
@@ -33,9 +29,8 @@ func skipConductor() {
 		},
 	})
 	if err != nil {
-		panic(err)
+		return nil, nil, err
 	}
-	defer client.Close()
 
 	// A "thread" is the sdk's notion of a single agent's context. We reuse threads to reuse context.
 	thread, err := client.StartThread(ctx, codex.ThreadStartOptions{
@@ -43,40 +38,12 @@ func skipConductor() {
 		SandboxPolicy:  codex.SandboxModeDangerFullAccess,
 	})
 	if err != nil {
-		panic(err)
+		if closeErr := client.Close(); closeErr != nil {
+			return nil, nil, fmt.Errorf("start skip-conductor thread: %w; close client: %v", err, closeErr)
+		}
+		return nil, nil, err
 	}
 	fmt.Printf("Codex thread ID: %s\n\n", thread.ID())
 
-	// ==== main task =============================================
-
-	prompt := "Make a new directory named foo and write a python fizzbuzz inside"
-	mainTaskResult, err := thread.Run(ctx, prompt, nil)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(mainTaskResult.FinalResponse)
-
-	// ==== task 2 ================================================
-
-	endingReportResult, err := thread.Run(ctx, endingReport, nil)
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Println(endingReportResult.FinalResponse)
-
-	// ==== print full agent transcript ===========================
-
-	// The thread ID is the durable handle you use to map this Go-run agent to
-	// Codex's local saved transcript/session history.
-	transcript, err := client.Client().ThreadRead(ctx, protocol.ThreadReadParams{
-		ThreadID:     thread.ID(),
-		IncludeTurns: true,
-	})
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Printf("\n==== persisted transcript for thread %s ====\n", thread.ID())
-	printJSON(transcript)
+	return client, thread, nil
 }
