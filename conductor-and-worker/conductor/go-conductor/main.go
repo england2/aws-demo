@@ -377,8 +377,7 @@ func main() {
 
 	}
 
-	// Writes `CONDUCTOR_READY_FOR_SAFE_SHUTDOWN`, which the CI waits to exit
-	// Also ensure that the CI deployment waiter also waits on `pgrep -f '^/usr/local/bin/go-conductor$'` to have a non-zero exit code.
+	// Writes `CONDUCTOR_READY_FOR_SAFE_SHUTDOWN`, which the CI waits for before the conductor restarts.
 	safeShutdownSucceededPath := filepath.Join(runDir, "CONDUCTOR_READY_FOR_SAFE_SHUTDOWN")
 	if err := os.WriteFile(safeShutdownSucceededPath, []byte("true\n"), 0o644); err != nil {
 		log.Fatalf("write safe shutdown succeeded file: %v", err)
