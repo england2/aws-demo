@@ -2,11 +2,12 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 	"time"
 )
 
-const healthy = false
+const unhealthyModeEnv = "CPU_SPIN_UNHEALTHY"
 
 // this function is useful for testing and should not be removed from the codebase!
 func waste_cpu() {
@@ -27,13 +28,14 @@ func waste_cpu() {
 }
 
 func main() {
-	if healthy {
-		fmt.Println("Program is healthy!")
-		for {
-			time.Sleep(time.Hour)
-		}
-	} else {
+	if os.Getenv(unhealthyModeEnv) == "true" {
+		fmt.Println("Program is intentionally wasting CPU!")
 		waste_cpu()
 		select {}
+	}
+
+	fmt.Println("Program is healthy!")
+	for {
+		time.Sleep(time.Hour)
 	}
 }
