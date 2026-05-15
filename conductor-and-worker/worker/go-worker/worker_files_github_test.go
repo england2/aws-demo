@@ -187,6 +187,9 @@ printf 'https://github.example/pull/1\n'
 	if pullRequestCreationResult.BranchName != "feature/test" {
 		t.Fatalf("branch name = %q, want feature/test", pullRequestCreationResult.BranchName)
 	}
+	if pullRequestCreationResult.URL != "https://github.example/pull/1" {
+		t.Fatalf("pull request URL = %q, want fake gh URL", pullRequestCreationResult.URL)
+	}
 
 	commandLogBytes, err := os.ReadFile(commandLogPath)
 	if err != nil {
@@ -223,9 +226,12 @@ printf 'https://github.example/issues/1\n'
 		t.Fatalf("write GitHub report: %v", err)
 	}
 
-	_, err := createFailedWorkerGitHubIssue(context.Background(), repoPath, gitHubReportPath, "GitHub auth failed during sparse checkout", "worker-test")
+	gitHubIssueCreationResult, err := createFailedWorkerGitHubIssue(context.Background(), repoPath, gitHubReportPath, "GitHub auth failed during sparse checkout", "worker-test")
 	if err != nil {
 		t.Fatalf("create failed worker GitHub issue: %v", err)
+	}
+	if gitHubIssueCreationResult.URL != "https://github.example/issues/1" {
+		t.Fatalf("GitHub issue URL = %q, want fake gh URL", gitHubIssueCreationResult.URL)
 	}
 
 	commandLogBytes, err := os.ReadFile(commandLogPath)
@@ -241,6 +247,22 @@ printf 'https://github.example/issues/1\n'
 	}
 }
 
+func TestWriteGitHubLinkFilePersistsCreatedPublicationURL(t *testing.T) {
+	workerRuntimePaths := testWorkerRuntimePaths(t)
+
+	if err := writeGitHubLinkFile(workerRuntimePaths, "https://github.example/pull/12"); err != nil {
+		t.Fatalf("write GitHub link file: %v", err)
+	}
+
+	assertFileContents(t, workerRuntimePaths.GitHubLinkPath, "https://github.example/pull/12\n")
+}
+
+func TestExtractGitHubURLFromOutputRequiresURL(t *testing.T) {
+	if _, err := extractGitHubURLFromOutput("created pull request without link"); err == nil {
+		t.Fatal("GitHub output without URL should fail")
+	}
+}
+
 func testWorkerRuntimePaths(t *testing.T) WorkerRuntimePaths {
 	t.Helper()
 
@@ -252,6 +274,7 @@ func testWorkerRuntimePaths(t *testing.T) WorkerRuntimePaths {
 		JobSuccessPath:   filepath.Join(workDir, "agent-meta", "WAS_JOB_SUCCESSFUL"),
 		EndingReportPath: filepath.Join(workDir, "agent-meta", "ending-report.md"),
 		PRMessagePath:    filepath.Join(workDir, "agent-meta", "pr-message.md"),
+		GitHubLinkPath:   filepath.Join(workDir, "agent-meta", "GHLINK"),
 	}
 	if err := ensureDirsExist([]string{workerRuntimePaths.RepoRootDir, workerRuntimePaths.AgentMetaDir}); err != nil {
 		t.Fatalf("create test worker runtime dirs: %v", err)

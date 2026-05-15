@@ -18,6 +18,7 @@ type WorkerRuntimePaths struct {
 	JobSuccessPath   string
 	EndingReportPath string
 	PRMessagePath    string
+	GitHubLinkPath   string
 }
 
 type WorkerArtifactValidationResult struct {
@@ -27,10 +28,12 @@ type WorkerArtifactValidationResult struct {
 
 type PullRequestCreationResult struct {
 	BranchName string
+	URL        string
 	Output     string
 }
 
 type GitHubIssueCreationResult struct {
+	URL    string
 	Output string
 }
 
@@ -49,6 +52,7 @@ func defaultWorkerRuntimePaths() WorkerRuntimePaths {
 		JobSuccessPath:   filepath.Join(workerAgentMetaDir, "WAS_JOB_SUCCESSFUL"),
 		EndingReportPath: filepath.Join(workerAgentMetaDir, "ending-report.md"),
 		PRMessagePath:    filepath.Join(workerAgentMetaDir, "pr-message.md"),
+		GitHubLinkPath:   filepath.Join(workerAgentMetaDir, "GHLINK"),
 	}
 }
 
@@ -311,9 +315,14 @@ func createPullRequestFromWorkerRepo(
 	if err != nil {
 		return PullRequestCreationResult{}, err
 	}
+	pullRequestURL, err := extractGitHubURLFromOutput(string(pullRequestOutput))
+	if err != nil {
+		return PullRequestCreationResult{}, err
+	}
 
 	return PullRequestCreationResult{
 		BranchName: branchName,
+		URL:        pullRequestURL,
 		Output:     string(pullRequestOutput),
 	}, nil
 }
@@ -331,10 +340,37 @@ func createFailedWorkerGitHubIssue(
 	if err != nil {
 		return GitHubIssueCreationResult{}, err
 	}
+	gitHubIssueURL, err := extractGitHubURLFromOutput(string(gitHubIssueOutput))
+	if err != nil {
+		return GitHubIssueCreationResult{}, err
+	}
 
 	return GitHubIssueCreationResult{
+		URL:    gitHubIssueURL,
 		Output: string(gitHubIssueOutput),
 	}, nil
+}
+
+func extractGitHubURLFromOutput(gitHubCommandOutput string) (string, error) {
+	for _, outputField := range strings.Fields(gitHubCommandOutput) {
+		if strings.HasPrefix(outputField, "https://") || strings.HasPrefix(outputField, "http://") {
+			return outputField, nil
+		}
+	}
+
+	return "", fmt.Errorf("GitHub command output did not contain a URL: %q", gitHubCommandOutput)
+}
+
+func writeGitHubLinkFile(workerRuntimePaths WorkerRuntimePaths, gitHubURL string) error {
+	if strings.TrimSpace(gitHubURL) == "" {
+		return fmt.Errorf("GitHub URL is required")
+	}
+
+	if err := os.WriteFile(workerRuntimePaths.GitHubLinkPath, []byte(gitHubURL+"\n"), 0o644); err != nil {
+		return fmt.Errorf("write GitHub link file: %w", err)
+	}
+
+	return nil
 }
 
 func runWorkerRepoCommand(ctx context.Context, repoPath string, commandName string, commandArgs ...string) ([]byte, error) {

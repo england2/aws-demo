@@ -275,6 +275,7 @@ func main() {
 	}
 	fmt.Printf("[internal %s]: GitHub report markdown written to %s title=%q\n", workerID, gitHubReportMarkdownResult.Path, gitHubReportMarkdownResult.Title)
 
+	gitHubPublicationURL := ""
 	if workerCodexRunResult.ShouldCreatePullRequest {
 		fmt.Printf("[internal %s]: worker succeeded; creating GitHub pull request from %s\n", workerID, workerCodexRunResult.RepoPath)
 		pullRequestCreationResult, err := createPullRequestFromWorkerRepo(codexContext, workerCodexRunResult.RepoPath, gitHubReportMarkdownResult.Path, gitHubReportMarkdownResult.Title, workerID)
@@ -282,6 +283,7 @@ func main() {
 			reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, err)
 		}
 		fmt.Printf("[internal %s]: created pull request from branch %s:\n%s\n", workerID, pullRequestCreationResult.BranchName, pullRequestCreationResult.Output)
+		gitHubPublicationURL = pullRequestCreationResult.URL
 	} else if repoPath, repoAvailable := findOptionalWorkerGitRepo(workerRuntimePaths); repoAvailable {
 		fmt.Printf("[internal %s]: worker did not request PR; creating failed-worker GitHub issue from %s\n", workerID, repoPath)
 		gitHubIssueCreationResult, err := createFailedWorkerGitHubIssue(codexContext, repoPath, gitHubReportMarkdownResult.Path, gitHubReportMarkdownResult.Title, workerID)
@@ -289,8 +291,17 @@ func main() {
 			reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, err)
 		}
 		fmt.Printf("[internal %s]: created failed-worker GitHub issue:\n%s\n", workerID, gitHubIssueCreationResult.Output)
+		gitHubPublicationURL = gitHubIssueCreationResult.URL
 	} else {
 		fmt.Printf("[internal %s]: worker did not request PR and no Git repo was available; skipping GitHub publication\n", workerID)
+	}
+
+	workerShutdownMessage := "safely ended"
+	if gitHubPublicationURL != "" {
+		if err := writeGitHubLinkFile(workerRuntimePaths, gitHubPublicationURL); err != nil {
+			reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, err)
+		}
+		workerShutdownMessage = fmt.Sprintf("safely ended; github link: %s", gitHubPublicationURL)
 	}
 
 	if err := uploadFiles(grpcContext, conductorClient, workerIdentity); err != nil {
@@ -304,7 +315,7 @@ func main() {
 	// Now that we've finished our work, we can safely shutdown.
 	shutdownResponse, err := conductorClient.WorkerStartsShutdown(grpcContext, &sharedproto.Shutdown{
 		Worker:        workerIdentity,
-		WorkerMessage: "safely ended",
+		WorkerMessage: workerShutdownMessage,
 	})
 	if err != nil {
 		log.Fatalf("start worker shutdown: %v", err)
