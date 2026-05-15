@@ -240,8 +240,8 @@ func firstExistingWorkerRepoBaseRef(repoPath string, baseRefs []string) (string,
 	return "", fmt.Errorf("repo %q has neither origin/main nor main available for branch comparison", repoPath)
 }
 
-func writeGitHubReportMarkdown(workerRuntimePaths WorkerRuntimePaths, transcriptJSON []byte) (GitHubReportMarkdownResult, error) {
-	fmt.Printf("[internal]: building GitHub report from ending_report=%s transcript_bytes=%d\n", workerRuntimePaths.EndingReportPath, len(transcriptJSON))
+func writeGitHubReportMarkdown(workerRuntimePaths WorkerRuntimePaths, transcriptText string) (GitHubReportMarkdownResult, error) {
+	fmt.Printf("[internal]: building GitHub report from ending_report=%s transcript_text_bytes=%d\n", workerRuntimePaths.EndingReportPath, len(transcriptText))
 
 	endingReportBytes, err := os.ReadFile(workerRuntimePaths.EndingReportPath)
 	if err != nil {
@@ -257,14 +257,14 @@ func writeGitHubReportMarkdown(workerRuntimePaths WorkerRuntimePaths, transcript
 ## Full Agent Transcript
 
 <details>
-<summary>Click to see full agent transcript JSON</summary>
+<summary>Click to see extracted agent transcript text</summary>
 
-`+"```"+`json
+`+"```"+`text
 %s
 `+"```"+`
 
 </details>
-`, endingReportMarkdown, string(transcriptJSON))
+`, endingReportMarkdown, transcriptText)
 
 	if err := os.WriteFile(workerRuntimePaths.PRMessagePath, []byte(gitHubReportMarkdown), 0o644); err != nil {
 		return GitHubReportMarkdownResult{}, fmt.Errorf("write GitHub report markdown: %w", err)

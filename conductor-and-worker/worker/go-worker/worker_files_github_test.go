@@ -115,7 +115,7 @@ func TestWriteGitHubReportMarkdownIncludesReportAndTranscriptDetails(t *testing.
 		t.Fatalf("write ending report: %v", err)
 	}
 
-	gitHubReportMarkdownResult, err := writeGitHubReportMarkdown(workerRuntimePaths, []byte(`{"turns":[{"role":"assistant"}]}`))
+	gitHubReportMarkdownResult, err := writeGitHubReportMarkdown(workerRuntimePaths, "first assistant note\nsecond assistant note")
 	if err != nil {
 		t.Fatalf("write GitHub report markdown: %v", err)
 	}
@@ -134,8 +134,8 @@ func TestWriteGitHubReportMarkdownIncludesReportAndTranscriptDetails(t *testing.
 		"Outcome: Succeeded.",
 		"## Full Agent Transcript",
 		"<details>",
-		"Click to see full agent transcript JSON",
-		`{"turns":[{"role":"assistant"}]}`,
+		"Click to see extracted agent transcript text",
+		"first assistant note\nsecond assistant note",
 	} {
 		if !strings.Contains(gitHubReportText, expectedText) {
 			t.Fatalf("GitHub report markdown missing %q:\n%s", expectedText, gitHubReportText)
@@ -149,6 +149,37 @@ func TestWriteGitHubReportMarkdownIncludesReportAndTranscriptDetails(t *testing.
 	}
 	if !strings.Contains(gitHubReportText, "Outcome: Succeeded.\n\n## Full Agent Transcript\n\n<details>") {
 		t.Fatalf("GitHub transcript details should be under its own heading:\n%s", gitHubReportText)
+	}
+}
+
+func TestExtractTranscriptTextFromJSONCollectsEveryTextKey(t *testing.T) {
+	transcriptJSON := []byte(`{
+		"thread": {
+			"text": "thread title"
+		},
+		"turns": [
+			{
+				"role": "user",
+				"text": "please fix this"
+			},
+			{
+				"items": [
+					{"text": "assistant response"},
+					{"nested": {"text": "tool note\\nwith newline"}}
+				]
+			}
+		],
+		"ignored": "not collected"
+	}`)
+
+	transcriptText, err := extractTranscriptTextFromJSON(transcriptJSON)
+	if err != nil {
+		t.Fatalf("extract transcript text: %v", err)
+	}
+
+	expectedTranscriptText := "thread title\nplease fix this\nassistant response\ntool note\nwith newline"
+	if transcriptText != expectedTranscriptText {
+		t.Fatalf("transcript text = %q, want %q", transcriptText, expectedTranscriptText)
 	}
 }
 

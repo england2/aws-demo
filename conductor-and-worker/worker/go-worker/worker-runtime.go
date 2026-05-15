@@ -83,23 +83,28 @@ func formatValidationErrorsForPrompt(validationErrors []string) string {
 	return strings.Join(formattedValidationErrors, "\n")
 }
 
-func readCodexThreadTranscriptJSON(
+func readCodexThreadTranscriptText(
 	ctx context.Context,
 	codexClient *codex.Codex,
 	codexThread *codex.Thread,
-) ([]byte, error) {
+) (string, error) {
 	transcript, err := codexClient.Client().ThreadRead(ctx, protocol.ThreadReadParams{
 		ThreadID:     codexThread.ID(),
 		IncludeTurns: true,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("read codex thread transcript: %w", err)
+		return "", fmt.Errorf("read codex thread transcript: %w", err)
 	}
 
 	transcriptJSON, err := json.MarshalIndent(transcript, "", "  ")
 	if err != nil {
-		return nil, fmt.Errorf("marshal codex thread transcript: %w", err)
+		return "", fmt.Errorf("marshal codex thread transcript: %w", err)
 	}
 
-	return transcriptJSON, nil
+	transcriptText, err := extractTranscriptTextFromJSON(transcriptJSON)
+	if err != nil {
+		return "", fmt.Errorf("extract transcript text: %w", err)
+	}
+
+	return transcriptText, nil
 }

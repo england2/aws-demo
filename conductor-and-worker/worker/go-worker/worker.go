@@ -111,13 +111,13 @@ func main() {
 		}
 		fmt.Println(endingReportResult.FinalResponse)
 
-		transcriptJSON, err := readCodexThreadTranscriptJSON(skipConductorContext, skipConductorCodexClient, skipConductorThread)
+		transcriptText, err := readCodexThreadTranscriptText(skipConductorContext, skipConductorCodexClient, skipConductorThread)
 		if err != nil {
 			panic(err)
 		}
 
-		fmt.Printf("\n==== persisted transcript for thread %s ====\n", skipConductorThread.ID())
-		fmt.Println(string(transcriptJSON))
+		fmt.Printf("\n==== extracted transcript text for thread %s ====\n", skipConductorThread.ID())
+		fmt.Println(transcriptText)
 		return
 	}
 
@@ -262,14 +262,14 @@ func main() {
 	// Produce GitHub report and create a PR or failure issue
 	// =============================================================
 
-	fmt.Printf("[internal %s]: reading Codex transcript for GitHub report\n", workerID)
-	transcriptJSON, err := readCodexThreadTranscriptJSON(codexContext, codexClient, codexThread)
+	fmt.Printf("[internal %s]: reading Codex transcript text for GitHub report\n", workerID)
+	transcriptText, err := readCodexThreadTranscriptText(codexContext, codexClient, codexThread)
 	if err != nil {
 		reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, err)
 	}
 
 	fmt.Printf("[internal %s]: writing GitHub report markdown\n", workerID)
-	gitHubReportMarkdownResult, err := writeGitHubReportMarkdown(workerRuntimePaths, transcriptJSON)
+	gitHubReportMarkdownResult, err := writeGitHubReportMarkdown(workerRuntimePaths, transcriptText)
 	if err != nil {
 		reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, err)
 	}
