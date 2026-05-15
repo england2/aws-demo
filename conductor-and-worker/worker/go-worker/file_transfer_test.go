@@ -147,7 +147,7 @@ func TestRequestWorkFilesExtractsReceivedChunks(t *testing.T) {
 	if conductorClient.receivedFileTransferRequest.GetWorker().GetWorkerId() != workerID {
 		t.Fatalf("request worker id = %q, want %q", conductorClient.receivedFileTransferRequest.GetWorker().GetWorkerId(), workerID)
 	}
-	expectedWorkerMessage := "requesting work files"
+	expectedWorkerMessage := "requesting work files and then working..."
 	if conductorClient.receivedFileTransferRequest.GetWorkerMessage() != expectedWorkerMessage {
 		t.Fatalf("request worker message = %q, want %q", conductorClient.receivedFileTransferRequest.GetWorkerMessage(), expectedWorkerMessage)
 	}

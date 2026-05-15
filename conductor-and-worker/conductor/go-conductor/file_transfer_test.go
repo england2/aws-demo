@@ -139,7 +139,7 @@ func TestWorkerRequestsWorkFilesStreamsZipAfterHandshakeAndRecordsEvent(t *testi
 		Worker: &sharedproto.WorkerIdentity{
 			WorkerId: workerID,
 		},
-		WorkerMessage: "[worker-test]: requesting work files",
+		WorkerMessage: "[worker-test]: requesting work files and then working...",
 	}, workFilesStream)
 	if err != nil {
 		t.Fatalf("request work files: %v", err)
@@ -196,7 +196,7 @@ func TestWorkerRequestsWorkFilesRequiresHandshake(t *testing.T) {
 		Worker: &sharedproto.WorkerIdentity{
 			WorkerId: workerID,
 		},
-		WorkerMessage: "[worker-test]: requesting work files",
+		WorkerMessage: "[worker-test]: requesting work files and then working...",
 	}, workFilesStream)
 	if err == nil {
 		t.Fatal("request work files should fail before handshake")
@@ -236,7 +236,7 @@ func TestWorkerRequestsWorkFilesDoesNotRecordSuccessWhenStreamSendFails(t *testi
 		Worker: &sharedproto.WorkerIdentity{
 			WorkerId: workerID,
 		},
-		WorkerMessage: "[worker-test]: requesting work files",
+		WorkerMessage: "[worker-test]: requesting work files and then working...",
 	}, workFilesStream)
 	if err == nil {
 		t.Fatal("request work files should fail when stream send fails")

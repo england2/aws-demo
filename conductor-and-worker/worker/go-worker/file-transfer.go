@@ -20,7 +20,7 @@ func requestWorkFiles(
 	workerID := workerIdentity.GetWorkerId()
 	workFilesStream, err := conductorClient.WorkerRequestsWorkFiles(ctx, &sharedproto.FileTransferRequest{
 		Worker:        workerIdentity,
-		WorkerMessage: "requesting work files",
+		WorkerMessage: "requesting work files and then working...",
 	})
 	if err != nil {
 		return fmt.Errorf("request work files stream: %w", err)

@@ -78,11 +78,4 @@ RUN chmod +x /entrypoint.sh /usr/local/bin/clone-repo.fish /usr/local/bin/go.sh 
     /usr/local/bin/go.sh && \
     go version
 
-# real
-# ENTRYPOINT ["/usr/local/bin/worker"]
-
-# testing 1
 ENTRYPOINT ["/entrypoint.sh"]
-# testing 2
-
-# ENTRYPOINT ["sleep infinity"]
