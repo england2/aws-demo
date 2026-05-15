@@ -225,6 +225,7 @@ func main() {
 
 	fmt.Printf("polling SQS queue with scheduler DB %s\n", schedulerDatabasePath)
 
+	// This channel is used to stop polling SQS messages (and therefore stop accepting jobs) when we're deploying a new version of the conductor.
 	chanPollDone := make(chan struct{})
 
 	go func(pollLoopContext context.Context, chanPollDone <-chan struct{}) {

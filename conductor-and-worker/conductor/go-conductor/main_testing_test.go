@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"go-conductor/db-internal/shared"
 	scheduler "go-conductor/go-db-scheduler"
@@ -80,7 +79,6 @@ func TestConductorWorkerDialAddressFallsBackToListenAddress(t *testing.T) {
 func TestInsertPolledSQSMessageAndRunSchedulerPersistsSchedulesAndReturnsDecisions(t *testing.T) {
 	ctx := context.Background()
 	schedulerDatabasePath := createEmptyMainTestingSchedulerDatabase(t)
-	insertPreviousAlarmMessage(t, schedulerDatabasePath)
 
 	schedulerWorker, err := scheduler.Open(ctx, scheduler.Config{DBPath: schedulerDatabasePath})
 	if err != nil {
@@ -125,8 +123,8 @@ func TestInsertPolledSQSMessageAndRunSchedulerPersistsSchedulesAndReturnsDecisio
 	}
 
 	totalAlarmRows, chainedAlarmRows, decidedAlarmRows := alarmMessageCounts(t, schedulerDatabasePath)
-	if totalAlarmRows != 2 || chainedAlarmRows != 2 || decidedAlarmRows != 2 {
-		t.Fatalf("alarm counts total=%d chained=%d decided=%d, want 2/2/2", totalAlarmRows, chainedAlarmRows, decidedAlarmRows)
+	if totalAlarmRows != 1 || chainedAlarmRows != 1 || decidedAlarmRows != 1 {
+		t.Fatalf("alarm counts total=%d chained=%d decided=%d, want 1/1/1", totalAlarmRows, chainedAlarmRows, decidedAlarmRows)
 	}
 }
 
@@ -260,28 +258,6 @@ func createEmptyMainTestingSchedulerDatabase(t *testing.T) string {
 	}
 
 	return schedulerDatabasePath
-}
-
-func insertPreviousAlarmMessage(t *testing.T, schedulerDatabasePath string) {
-	t.Helper()
-
-	database, err := sql.Open("sqlite", schedulerDatabasePath)
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	defer database.Close()
-
-	receivedAt := time.Now().UTC().Add(-5 * time.Minute).Format("2006-01-02 15:04:05")
-	_, err = database.Exec(`
-		INSERT INTO sqs_alarm_messages (
-		    received_at,
-		    raw_message_body,
-		    aws_account_number
-		) VALUES (?, ?, ?)
-	`, receivedAt, `{"id":"event-1"}`, "204772699175")
-	if err != nil {
-		t.Fatalf("insert previous alarm: %v", err)
-	}
 }
 
 func alarmMessageCounts(t *testing.T, schedulerDatabasePath string) (total int64, chained int64, decided int64) {

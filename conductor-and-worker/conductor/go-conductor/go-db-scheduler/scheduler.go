@@ -327,8 +327,7 @@ func scheduleAlarms(ctx context.Context, q *sqlcgen.Queries) ([]shared.ScheduleD
 }
 
 func processAlarmChain(ctx context.Context, q *sqlcgen.Queries, chain []sqlcgen.SqsAlarmMessage) (shared.ScheduleDecision, bool, error) {
-	if len(chain) < 2 {
-		logSchedulerDebug("no alarm decision: chain has fewer than 2 rows")
+	if len(chain) == 0 {
 		return shared.ScheduleDecision{}, false, nil
 	}
 

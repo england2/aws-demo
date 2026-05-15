@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,31 @@ import (
 
 	_ "modernc.org/sqlite"
 )
+
+// counter-factural confirmed
+func TestRunSchedulingWithSingleAlarm(t *testing.T) {
+	ctx := context.Background()
+	dbPath := createAlarmTestDB(t, []string{"2026-05-12 20:00:00"})
+
+	decisions, err := Run(ctx, Config{DBPath: dbPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decisions) != 1 {
+		t.Fatalf("expected 1 decision, got %d", len(decisions))
+	}
+	if decisions[0].MessageType != shared.ScheduleMessageTypeIncident {
+		t.Fatalf("unexpected message type: %q", decisions[0].MessageType)
+	}
+	if !strings.Contains(decisions[0].Text, "test-alarm-1") {
+		t.Fatalf("expected single alarm body in decision text, got %q", decisions[0].Text)
+	}
+
+	alarmCount, chainedCount, decidedCount := alarmCounts(t, dbPath)
+	if alarmCount != 1 || chainedCount != 1 || decidedCount != 1 {
+		t.Fatalf("unexpected alarm counts: total=%d chained=%d decided=%d", alarmCount, chainedCount, decidedCount)
+	}
+}
 
 func TestRunSchedulingWithExistingAlarmFixture(t *testing.T) {
 	ctx := context.Background()
@@ -133,13 +159,6 @@ func createEmptyTestDB(t *testing.T) string {
 func createChainedAlarmTestDB(t *testing.T) string {
 	t.Helper()
 
-	dbPath := createEmptyTestDB(t)
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
 	times := []string{
 		"2026-05-12 20:00:00",
 		"2026-05-12 20:12:00",
@@ -151,6 +170,19 @@ func createChainedAlarmTestDB(t *testing.T) string {
 		"2026-05-12 21:23:00",
 	}
 
+	return createAlarmTestDB(t, times)
+}
+
+func createAlarmTestDB(t *testing.T, times []string) string {
+	t.Helper()
+
+	dbPath := createEmptyTestDB(t)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
 	for index, receivedAt := range times {
 		_, err := db.Exec(`
 			INSERT INTO sqs_alarm_messages (
@@ -158,7 +190,7 @@ func createChainedAlarmTestDB(t *testing.T) string {
 			    raw_message_body,
 			    aws_account_number
 			) VALUES (?, ?, ?)
-		`, receivedAt, `{"id":"test-alarm-`+string(rune('1'+index))+`"}`, "204772699175")
+		`, receivedAt, fmt.Sprintf(`{"id":"test-alarm-%d"}`, index+1), "204772699175")
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -59,7 +59,7 @@ The scheduler should also be able to run after a restart. If previous rows alrea
 
 ## Alarm Scheduling Goal
 
-CloudWatch alarms can arrive in bursts. If many related alarms arrive close together, the conductor should not spawn one agent per alarm. Instead, same-account alarms close in time should be treated as a chain, and the chain should produce one spawn decision.
+CloudWatch alarms can arrive in bursts, but they can also arrive as a single EventBridge state-change message for a sustained incident. A new alarm chain should produce one spawn decision as soon as the first alarm row is seen, and later same-account alarms close in time should be absorbed into that already-decided chain.
 
 For the current design, alarms are related only by AWS account number. There are no alarm configs, no named groups, and no per-alarm rules. If two alarm messages have the same AWS account number, they are candidates to be chained together. If they have different AWS account numbers, they belong to different scheduling groups.
 
@@ -109,11 +109,11 @@ For account A, `10:00` and `10:20` can chain. The account B message is evaluated
 
 ## When an Alarm Chain Should Spawn
 
-A single alarm by itself should not produce a spawn decision. The purpose of alarm scheduling is to detect repeated or clustered alarm pressure, not to spawn an agent for every individual alarm.
+A single alarm by itself should produce a spawn decision. The purpose of alarm scheduling is to start work for a new incident while still avoiding duplicate agents when more messages arrive for the same continuing incident.
 
 An alarm chain qualifies for scheduling when:
 
-1. It contains at least two alarm messages.
+1. It contains at least one alarm message.
 2. All messages in the chain have the same AWS account number.
 3. Each adjacent pair of messages is no more than one hour apart.
 4. No previous scheduler run has already returned a spawn decision for that chain.
@@ -177,7 +177,7 @@ A chain only becomes eligible for a new spawn decision after the rolling chain i
 12:30 account A
 ```
 
-The first three rows are one chain. The `12:10` row is more than one hour after `10:45`, so it starts a new potential chain. When `12:30` arrives, those two later rows form a new chain that can produce a new spawn decision, assuming that later chain has not already been decided.
+The first three rows are one chain. The `12:10` row is more than one hour after `10:45`, so it starts a new chain that can produce a new spawn decision, assuming that later chain has not already been decided. The `12:30` row is then absorbed into the already-decided later chain.
 
 ## Alarm Scheduling Pass
 
@@ -188,8 +188,7 @@ Conceptually, an alarm scheduling run should:
 3. Sort each account's rows by receive time, with a stable tie-breaker such as row ID.
 4. Walk each account's rows in order.
 5. Build rolling chains where adjacent rows are no more than one hour apart.
-6. Ignore chains with fewer than two rows.
-7. For each qualifying chain:
+6. For each qualifying chain:
    - mark rows as chained;
    - check whether any row in the chain already indicates that a spawn decision was returned;
    - if any row was already decided, mark the rest of that chain as decided and return no decision;
@@ -304,9 +303,9 @@ The shared `ScheduleDecision` type should live in an importable non-`main` packa
 
 ## Expected Outcomes
 
-A fresh database with one isolated alarm should produce no alarm decision.
+A fresh database with one isolated alarm should produce one alarm decision.
 
-A fresh database with two or more same-account alarms no more than one hour apart should produce one alarm decision.
+A fresh database with two or more same-account alarms no more than one hour apart should still produce only one alarm decision.
 
 A fresh database with eight same-account alarms twelve minutes apart should produce one alarm decision, not eight.
 
@@ -314,7 +313,7 @@ Running the scheduler a second time over that same database should produce no de
 
 Adding another same-account alarm within one hour of the already-decided chain should still produce no new decision; it should be absorbed into the decided chain.
 
-Adding two later same-account alarms after the previous chain has been broken by more than one hour should produce one new decision for the new chain.
+Adding one later same-account alarm after the previous chain has been broken by more than one hour should produce one new decision for the new chain.
 
 Adding alarms from two accounts should evaluate each account independently.
 
