@@ -115,7 +115,8 @@ func TestWriteGitHubReportMarkdownIncludesReportAndTranscriptDetails(t *testing.
 		t.Fatalf("write ending report: %v", err)
 	}
 
-	gitHubReportMarkdownResult, err := writeGitHubReportMarkdown(workerRuntimePaths, "first assistant note\nsecond assistant note")
+	transcriptText := "first assistant note\n# Agent Instructions\n- do not render this as markdown"
+	gitHubReportMarkdownResult, err := writeGitHubReportMarkdown(workerRuntimePaths, transcriptText)
 	if err != nil {
 		t.Fatalf("write GitHub report markdown: %v", err)
 	}
@@ -135,11 +136,15 @@ func TestWriteGitHubReportMarkdownIncludesReportAndTranscriptDetails(t *testing.
 		"## Full Agent Transcript",
 		"<details>",
 		"Click to see extracted agent transcript text",
-		"first assistant note\nsecond assistant note",
+		transcriptText,
 	} {
 		if !strings.Contains(gitHubReportText, expectedText) {
 			t.Fatalf("GitHub report markdown missing %q:\n%s", expectedText, gitHubReportText)
 		}
+	}
+	expectedTranscriptFence := "```txt\n" + transcriptText + "\n```"
+	if !strings.Contains(gitHubReportText, expectedTranscriptFence) {
+		t.Fatalf("GitHub report markdown should wrap transcript text in txt fence:\n%s", gitHubReportText)
 	}
 	if strings.Contains(gitHubReportText, "## Final Report\n\n# Final Report") {
 		t.Fatalf("GitHub report markdown repeats final report headings:\n%s", gitHubReportText)

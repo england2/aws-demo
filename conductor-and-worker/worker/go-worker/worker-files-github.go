@@ -259,7 +259,7 @@ func writeGitHubReportMarkdown(workerRuntimePaths WorkerRuntimePaths, transcript
 <details>
 <summary>Click to see extracted agent transcript text</summary>
 
-`+"```"+`text
+`+"```"+`txt
 %s
 `+"```"+`
 
