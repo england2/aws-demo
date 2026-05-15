@@ -14,6 +14,8 @@ protobuf-devel
 protoc-gen-go
 protoc-gen-go-grpc
 sqlc
+
+# (for the go formatting script to work):
 fish
 fd
 gofumpt
