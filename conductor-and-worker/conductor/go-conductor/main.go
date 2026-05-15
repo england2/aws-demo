@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -116,7 +115,6 @@ const (
 
 var isGlobalShutdownOkay bool
 
-
 // temporary reference function showing how to use the scheduler package
 
 // conductorWorkerDialAddress returns the address passed into worker container env.
@@ -132,6 +130,16 @@ func conductorWorkerDialAddress() string {
 
 // FIXME: 252 LoC in main, surely we can do better!
 func main() {
+	if err := runConductor(); err != nil {
+		fmt.Fprintf(os.Stderr, "conductor exited: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// runConductor wires startup, SQS polling, scheduling, worker spawning, and the gRPC server.
+// Startup errors are returned to main, while per-message and shutdown-file transient errors are printed
+// so one bad AWS call or half-written shutdown flag does not kill active worker coordination.
+func runConductor() error {
 	// =============================================================
 	// Runtime path, Files, and Args
 	// =============================================================
@@ -139,14 +147,14 @@ func main() {
 	// build runtime and shutdown files
 	runDir := filepath.Join(conductorRootPath, conductorRunDirName)
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
-		log.Fatalf("create run dir: %v", err)
+		return fmt.Errorf("create run dir: %w", err)
 	}
 	shutdownOkayPath := filepath.Join(runDir, conductorShuttingDown)
 	if err := os.Remove(shutdownOkayPath); err != nil && !os.IsNotExist(err) {
-		log.Fatalf("remove old shutdown file: %v", err)
+		return fmt.Errorf("remove old shutdown file: %w", err)
 	}
 	if err := os.WriteFile(shutdownOkayPath, []byte("false\n"), 0o644); err != nil {
-		log.Fatalf("initialize shutdown file: %v", err)
+		return fmt.Errorf("initialize shutdown file: %w", err)
 	}
 
 	fmt.Printf("in main_testing\n\n")
@@ -159,7 +167,7 @@ func main() {
 
 	schedulerDatabasePath := testSchedulerDatabasePathFromFlags()
 	if schedulerDatabasePath == "" {
-		log.Fatal("test-db-loc is required")
+		return fmt.Errorf("test-db-loc is required")
 	}
 
 	dbContext := context.Background()
@@ -167,18 +175,19 @@ func main() {
 	if *debugAlwaysNewDB {
 		createdDatabasePath, err := debugCreateNewDbAndSetLocation(dbContext, schedulerDatabasePath)
 		if err != nil {
-			log.Fatalf("create debug scheduler database: %v", err)
+			return fmt.Errorf("create debug scheduler database: %w", err)
 		}
 		schedulerDatabasePath = createdDatabasePath
 	} else if !checkIsDbCompliant(dbContext, schedulerDatabasePath) {
-		log.Fatalf("database is not compliant: %s", schedulerDatabasePath)
+		fmt.Fprintf(os.Stderr, "database is not compliant: %s\n", schedulerDatabasePath)
+		return nil
 	}
 
 	schedulerWorker, err := scheduler.Open(dbContext, scheduler.Config{
 		DBPath: schedulerDatabasePath,
 	})
 	if err != nil {
-		log.Fatalf("open scheduler: %v", err)
+		return fmt.Errorf("open scheduler: %w", err)
 	}
 	defer schedulerWorker.Close()
 
@@ -187,7 +196,7 @@ func main() {
 
 	sqsPoller, err := NewTicketCloudWatchSQSPoller(pollingContext)
 	if err != nil {
-		log.Fatalf("create sqs poller: %v", err)
+		return fmt.Errorf("create sqs poller: %w", err)
 	}
 
 	// =============================================================
@@ -200,7 +209,7 @@ func main() {
 
 	listener, err := net.Listen("tcp", *serverAddr)
 	if err != nil {
-		log.Fatalf("listen: %v", err)
+		return fmt.Errorf("listen: %w", err)
 	}
 
 	registry := newWorkerRegistry()
@@ -213,7 +222,7 @@ func main() {
 
 	go func() {
 		if err := grpcServer.Serve(listener); err != nil {
-			log.Fatalf("serve: %v", err)
+			fmt.Fprintf(os.Stderr, "serve grpc: %v\n", err)
 		}
 	}()
 
@@ -293,7 +302,8 @@ func main() {
 						RunDir:                  runDir,
 					})
 					if err != nil {
-						log.Fatalf("prepare worker work files: %v", err)
+						fmt.Fprintf(os.Stderr, "prepare worker work files for sqs message %q: %v\n", polledSQSMessage.ExternalMessageID, err)
+						continue
 					}
 
 					fargateWorkerSpawnRequest := BuildFargateSpawnRequest(
@@ -326,7 +336,8 @@ func main() {
 						newWorkerSpawnConfig,
 						spawnFunc,
 					); err != nil {
-						log.Fatalf("spawn worker: %v", err)
+						fmt.Fprintf(os.Stderr, "spawn worker %q for sqs message %q: %v\n", newWorkerSpawnConfig.WorkerID, polledSQSMessage.ExternalMessageID, err)
+						continue
 					}
 				}
 
@@ -351,12 +362,14 @@ func main() {
 
 		shutdownOkayBytes, err := os.ReadFile(shutdownOkayPath)
 		if err != nil {
-			log.Fatalf("read shutdown file: %v", err)
+			fmt.Fprintf(os.Stderr, "read shutdown file: %v\n", err)
+			continue
 		}
 
 		isShutdownOkay, err := strconv.ParseBool(strings.TrimSpace(string(shutdownOkayBytes)))
 		if err != nil {
-			log.Fatalf("parse shutdown file: %v", err)
+			fmt.Fprintf(os.Stderr, "parse shutdown file %q: %v\n", strings.TrimSpace(string(shutdownOkayBytes)), err)
+			continue
 		}
 
 		if isShutdownOkay {
@@ -374,12 +387,13 @@ func main() {
 		if isShutdownOkay && numActiveWorkers == 0 {
 			break
 		}
-
 	}
 
 	// Writes `CONDUCTOR_READY_FOR_SAFE_SHUTDOWN`, which the CI waits for before the conductor restarts.
 	safeShutdownSucceededPath := filepath.Join(runDir, "CONDUCTOR_READY_FOR_SAFE_SHUTDOWN")
 	if err := os.WriteFile(safeShutdownSucceededPath, []byte("true\n"), 0o644); err != nil {
-		log.Fatalf("write safe shutdown succeeded file: %v", err)
+		return fmt.Errorf("write safe shutdown succeeded file: %w", err)
 	}
+
+	return nil
 }

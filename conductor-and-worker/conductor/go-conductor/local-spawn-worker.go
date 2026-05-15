@@ -7,7 +7,6 @@ import (
 	"os/exec"
 )
 
-// ai--done Local Docker spawning now builds the docker run command directly instead of shelling out to a helper script.
 // This file is a local development helper which allows you to spawn a local docker container as your worker instead of a Fargate container.
 
 // launchWorkerProcessTestingDocker adapts the local Docker smoke launcher to the registry's launcher shape.
@@ -19,7 +18,6 @@ func launchWorkerProcessTestingDocker(ctx context.Context, config workerSpawnCon
 }
 
 func execWorkerProcessTestingDocker(config workerSpawnConfig) (*exec.Cmd, error) {
-	// ai--done use inline Docker command args instead of /usr/local/bin/spawn-local-worker-helper.
 	cmd := exec.Command("docker", localDockerWorkerRunArgs(config)...)
 	cmd.Env = os.Environ()
 	cmd.Stdout = os.Stdout

@@ -143,7 +143,7 @@ func (awr *workerRegistry) removeWorker(workerID string) error {
 			continue
 		}
 
-		if !worker.didSafelyEnd() && !worker.hasEvent(WorkerEventCodexError) {
+		if !worker.didSafelyEnd() && !worker.hasEvent(WorkerEventCodexError) && !worker.hasEvent(WorkerEventBadlyEnded) {
 			fmt.Printf("warning: removing worker %s without a %s event\n", worker.ID, WorkerEventSafelyEnded.String())
 		}
 
@@ -193,7 +193,11 @@ func (awr *workerRegistry) spawnWorker(ctx context.Context, conf workerSpawnConf
 	})
 
 	if err := launchWorker(ctx, conf); err != nil {
-		return err
+		worker.recordEvent(WorkerEventBadlyEnded, err)
+		if removeErr := awr.removeWorker(conf.WorkerID); removeErr != nil {
+			return fmt.Errorf("launch worker %q: %w; additionally failed to remove registered worker: %v", conf.WorkerID, err, removeErr)
+		}
+		return fmt.Errorf("launch worker %q: %w", conf.WorkerID, err)
 	}
 
 	return nil
