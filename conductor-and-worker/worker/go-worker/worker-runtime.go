@@ -10,7 +10,7 @@ import (
 	"github.com/pmenglund/codex-sdk-go/protocol"
 )
 
-const maxWorkerArtifactValidationAttempts = 4
+const wrkMaxValidationAttemps = 4
 
 type WorkerCodexRunResult struct {
 	ShouldCreatePullRequest bool
@@ -42,7 +42,7 @@ func validateWorkerCodexArtifacts(workerRuntimePaths WorkerRuntimePaths) (Worker
 }
 
 func buildWorkerArtifactValidationFailureError(validationErrors []string) error {
-	return fmt.Errorf("worker artifact validation failed after %d attempts: %s", maxWorkerArtifactValidationAttempts, strings.Join(validationErrors, "; "))
+	return fmt.Errorf("worker artifact validation failed after %d attempts: %s", wrkMaxValidationAttemps, strings.Join(validationErrors, "; "))
 }
 
 func buildWorkerArtifactCorrectionPrompt(

@@ -157,15 +157,15 @@ func main() {
 	}
 	defer codexClient.Close()
 
-	// A "codexThread" is the sdk's notion of a single agent's context. We reuse threads to reuse context.
-	codexThread, err := codexClient.StartThread(codexContext, codex.ThreadStartOptions{
+	// A "cdxThread" is the sdk's notion of a single agent's context. We reuse threads to reuse context.
+	cdxThread, err := codexClient.StartThread(codexContext, codex.ThreadStartOptions{
 		ApprovalPolicy: codex.ApprovalPolicyNever,
 		SandboxPolicy:  codex.SandboxModeDangerFullAccess,
 	})
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("Codex thread ID: %s\n\n", codexThread.ID())
+	fmt.Printf("Codex thread ID: %s\n\n", cdxThread.ID())
 
 	// =============================================================
 	// Setup gRPC client, handshake with server, get work files
@@ -201,12 +201,12 @@ func main() {
 		log.Fatalf("request work files: %v", err)
 	}
 
-	workerRuntimePaths := defaultWorkerRuntimePaths()
+	wkrRunPaths := defaultWorkerRuntimePaths()
 	// /worker/work/repo/: contains the single task repository under one variable child directory.
 	// /worker/work/agent-meta/: contains worker-agent protocol files, final reports, and GitHub body markdown.
 	if err := ensureDirsExist([]string{
-		workerRuntimePaths.RepoRootDir,
-		workerRuntimePaths.AgentMetaDir,
+		wkrRunPaths.RepoRootDir,
+		wkrRunPaths.AgentMetaDir,
 	}); err != nil {
 		log.Fatalf("create worker runtime directories: %v", err)
 	}
@@ -215,47 +215,47 @@ func main() {
 	// Do agent work and validate worker artifacts
 	// =============================================================
 
-	mainTaskResult, err := codexThread.Run(codexContext, initialWorkerPrompt, nil)
+	mainTaskResult, err := cdxThread.Run(codexContext, initialWorkerPrompt, nil)
 	if err != nil {
 		reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, fmt.Errorf("run initial worker prompt: %w", err))
 	}
 	fmt.Println(mainTaskResult.FinalResponse)
 
-	reportResult, err := codexThread.Run(codexContext, endingReport, nil)
+	reportResult, err := cdxThread.Run(codexContext, endingReport, nil)
 	if err != nil {
 		reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, fmt.Errorf("run ending report prompt: %w", err))
 	}
 	fmt.Println(reportResult.FinalResponse)
 
-	var workerCodexRunResult WorkerCodexRunResult
-	for validationAttemptNumber := 1; validationAttemptNumber <= maxWorkerArtifactValidationAttempts; validationAttemptNumber++ {
-		fmt.Printf("[internal %s]: validating worker artifacts attempt %d/%d\n", workerID, validationAttemptNumber, maxWorkerArtifactValidationAttempts)
+	var wrkCodexRes WorkerCodexRunResult
+	for numAttempts := 1; numAttempts <= wrkMaxValidationAttemps; numAttempts++ {
+		fmt.Printf("[internal %s]: validating worker artifacts attempt %d/%d\n", workerID, numAttempts, wrkMaxValidationAttemps)
 
-		var validationErrors []string
-		workerCodexRunResult, validationErrors = validateWorkerCodexArtifacts(workerRuntimePaths)
-		if len(validationErrors) == 0 {
+		var validationErrs []string
+		wrkCodexRes, validationErrs = validateWorkerCodexArtifacts(wkrRunPaths)
+		if len(validationErrs) == 0 {
 			fmt.Printf(
 				"[internal %s]: worker artifact validation passed should_create_pull_request=%t repo_path=%q\n",
 				workerID,
-				workerCodexRunResult.ShouldCreatePullRequest,
-				workerCodexRunResult.RepoPath,
+				wrkCodexRes.ShouldCreatePullRequest,
+				wrkCodexRes.RepoPath,
 			)
 			break
 		}
 
-		fmt.Printf("[internal %s]: worker artifact validation failed: %s\n", workerID, strings.Join(validationErrors, "; "))
+		fmt.Printf("[internal %s]: worker artifact validation failed: %s\n", workerID, strings.Join(validationErrs, "; "))
 
-		if validationAttemptNumber == maxWorkerArtifactValidationAttempts {
-			reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, buildWorkerArtifactValidationFailureError(validationErrors))
+		if numAttempts == wrkMaxValidationAttemps {
+			reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, buildWorkerArtifactValidationFailureError(validationErrs))
 		}
 
 		fmt.Printf("[internal %s]: running artifact correction prompt\n", workerID)
-		correctionPrompt := buildWorkerArtifactCorrectionPrompt(workerRuntimePaths, validationErrors, validationAttemptNumber+1, maxWorkerArtifactValidationAttempts)
-		correctionResult, err := codexThread.Run(codexContext, correctionPrompt, nil)
+		correctionPrompt := buildWorkerArtifactCorrectionPrompt(wkrRunPaths, validationErrs, numAttempts+1, wrkMaxValidationAttemps)
+		correctionRes, err := cdxThread.Run(codexContext, correctionPrompt, nil)
 		if err != nil {
 			reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, fmt.Errorf("run worker artifact correction prompt: %w", err))
 		}
-		fmt.Println(correctionResult.FinalResponse)
+		fmt.Println(correctionRes.FinalResponse)
 	}
 
 	// =============================================================
@@ -263,28 +263,28 @@ func main() {
 	// =============================================================
 
 	fmt.Printf("[internal %s]: reading Codex transcript text for GitHub report\n", workerID)
-	transcriptText, err := readCodexThreadTranscriptText(codexContext, codexClient, codexThread)
+	transcriptText, err := readCodexThreadTranscriptText(codexContext, codexClient, cdxThread)
 	if err != nil {
 		reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, err)
 	}
 
 	fmt.Printf("[internal %s]: writing GitHub report markdown\n", workerID)
-	gitHubReportMarkdownResult, err := writeGitHubReportMarkdown(workerRuntimePaths, transcriptText)
+	gitHubReportMarkdownResult, err := writeGitHubReportMarkdown(wkrRunPaths, transcriptText)
 	if err != nil {
 		reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, err)
 	}
 	fmt.Printf("[internal %s]: GitHub report markdown written to %s title=%q\n", workerID, gitHubReportMarkdownResult.Path, gitHubReportMarkdownResult.Title)
 
 	gitHubPublicationURL := ""
-	if workerCodexRunResult.ShouldCreatePullRequest {
-		fmt.Printf("[internal %s]: worker succeeded; creating GitHub pull request from %s\n", workerID, workerCodexRunResult.RepoPath)
-		pullRequestCreationResult, err := createPullRequestFromWorkerRepo(codexContext, workerCodexRunResult.RepoPath, gitHubReportMarkdownResult.Path, gitHubReportMarkdownResult.Title, workerID)
+	if wrkCodexRes.ShouldCreatePullRequest {
+		fmt.Printf("[internal %s]: worker succeeded; creating GitHub pull request from %s\n", workerID, wrkCodexRes.RepoPath)
+		pullRequestCreationResult, err := createPullRequestFromWorkerRepo(codexContext, wrkCodexRes.RepoPath, gitHubReportMarkdownResult.Path, gitHubReportMarkdownResult.Title, workerID)
 		if err != nil {
 			reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, err)
 		}
 		fmt.Printf("[internal %s]: created pull request from branch %s:\n%s\n", workerID, pullRequestCreationResult.BranchName, pullRequestCreationResult.Output)
 		gitHubPublicationURL = pullRequestCreationResult.URL
-	} else if repoPath, repoAvailable := findOptionalWorkerGitRepo(workerRuntimePaths); repoAvailable {
+	} else if repoPath, repoAvailable := findOptionalWorkerGitRepo(wkrRunPaths); repoAvailable {
 		fmt.Printf("[internal %s]: worker did not request PR; creating failed-worker GitHub issue from %s\n", workerID, repoPath)
 		gitHubIssueCreationResult, err := createFailedWorkerGitHubIssue(codexContext, repoPath, gitHubReportMarkdownResult.Path, gitHubReportMarkdownResult.Title, workerID)
 		if err != nil {
@@ -298,7 +298,7 @@ func main() {
 
 	workerShutdownMessage := "safely ended"
 	if gitHubPublicationURL != "" {
-		if err := writeGitHubLinkFile(workerRuntimePaths, gitHubPublicationURL); err != nil {
+		if err := writeGitHubLinkFile(wkrRunPaths, gitHubPublicationURL); err != nil {
 			reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, err)
 		}
 		workerShutdownMessage = fmt.Sprintf("safely ended; github link: %s", gitHubPublicationURL)
