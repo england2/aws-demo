@@ -43,8 +43,6 @@ The very first line of `/worker/work/agent-meta/ending-report.md` must be a conc
 ```markdown
 Concise PR or issue title goes here
 
-# Final Report
-
 ## Agent's Job Understanding
 
 State your high-level understanding of the user's requested task in 2-5 sentences.
@@ -108,6 +106,8 @@ Include only useful information that does not fit above.
 
 Do not use this section for a second summary, a task log, or filler. If there is nothing useful to add, write: "None."
 
+Do not list repository branch names, commit hashes, pull request URLs, or issue URLs just to record Git metadata. GitHub already shows that information around the report. Mention Git details only when they are directly relevant to a blocker or risk.
+
 ```
 
 # What to Capture
@@ -161,8 +161,6 @@ Example:
 
 ```markdown
 Add CLI argument support to number-adder
-
-# Final Report
 
 ## Agent's Job Understanding
 

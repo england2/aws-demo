@@ -110,7 +110,7 @@ func TestValidateSuccessfulWorkerArtifactsRejectsUncommittedWorktree(t *testing.
 // counter-factural confirmed
 func TestWriteGitHubReportMarkdownIncludesReportAndTranscriptDetails(t *testing.T) {
 	workerRuntimePaths := testWorkerRuntimePaths(t)
-	reportMarkdown := "Fix number-adder CLI args\n\n# Final Report\n\nOutcome: Succeeded.\n"
+	reportMarkdown := "Fix number-adder CLI args\n\n## Agent's Job Understanding\n\nOutcome: Succeeded.\n"
 	if err := os.WriteFile(workerRuntimePaths.EndingReportPath, []byte(reportMarkdown), 0o644); err != nil {
 		t.Fatalf("write ending report: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestWriteGitHubReportMarkdownIncludesReportAndTranscriptDetails(t *testing.
 	gitHubReportText := string(gitHubReportBytes)
 	for _, expectedText := range []string{
 		"# Agent Work Report",
-		"## Final Report",
+		"## Agent's Job Understanding",
 		"Outcome: Succeeded.",
 		"## Full Agent Transcript",
 		"<details>",

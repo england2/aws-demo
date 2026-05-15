@@ -245,11 +245,8 @@ func writeGitHubReportMarkdown(workerRuntimePaths WorkerRuntimePaths, transcript
 	}
 
 	gitHubTitle, endingReportMarkdown := splitEndingReportTitleAndBody(strings.TrimSpace(string(endingReportBytes)), "Agent work report")
-	endingReportMarkdown = stripLeadingFinalReportHeading(endingReportMarkdown)
 
 	gitHubReportMarkdown := fmt.Sprintf(`# Agent Work Report
-
-## Final Report
 
 %s
 
@@ -290,21 +287,6 @@ func splitEndingReportTitleAndBody(reportMarkdown string, fallbackTitle string) 
 	}
 
 	return title, strings.TrimSpace(strings.Join(reportLines[1:], "\n"))
-}
-
-func stripLeadingFinalReportHeading(reportMarkdown string) string {
-	reportLines := strings.Split(reportMarkdown, "\n")
-	if len(reportLines) == 0 {
-		return reportMarkdown
-	}
-
-	firstLine := strings.TrimSpace(reportLines[0])
-	headingText := strings.TrimSpace(strings.TrimLeft(firstLine, "#"))
-	if strings.HasPrefix(firstLine, "#") && headingText == "Final Report" {
-		return strings.TrimSpace(strings.Join(reportLines[1:], "\n"))
-	}
-
-	return reportMarkdown
 }
 
 func createPullRequestFromWorkerRepo(
