@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const healthy = false
+const healthy = true
 
 // this function is useful for testing and should not be removed from the codebase!
 func waste_cpu() {
