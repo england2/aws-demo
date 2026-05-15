@@ -2,21 +2,26 @@ use std::env;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
+    let program_name = &args[0];
 
-    if args.len() != 3 {
-        eprintln!("Usage: {} <num1> <num2>", args[0]);
+    if args.len() < 2 {
+        eprintln!("Usage: {} <num> [num ...]", program_name);
         std::process::exit(1);
     }
 
-    let x: i32 = args[1]
-        .parse()
-        .expect("arg 1 must be a valid integer");
+    let mut sum = 0;
 
-    let y: i32 = args[2]
-        .parse()
-        .expect("arg 2 must be a valid integer");
+    for (index, arg) in args.iter().skip(1).enumerate() {
+        let number: i32 = match arg.parse() {
+            Ok(number) => number,
+            Err(_) => {
+                eprintln!("arg {} must be a valid integer", index + 1);
+                std::process::exit(1);
+            }
+        };
 
-    let sum = x + y;
+        sum += number;
+    }
 
-    println!("The sum of {} and {} is {}", x, y, sum);
+    println!("The sum is {}", sum);
 }
