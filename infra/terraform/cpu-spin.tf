@@ -94,6 +94,7 @@ resource "aws_instance" "server" {
   associate_public_ip_address = true
   key_name                    = var.ssh_key_name
   iam_instance_profile        = aws_iam_instance_profile.server.name
+  monitoring                  = true
 
   root_block_device {
     volume_size = 8
