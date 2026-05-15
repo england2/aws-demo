@@ -24,6 +24,7 @@ FROM debian:bookworm-slim
 
 ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin:/root/.go/bin:/root/go/bin"
 ENV SHELL=/bin/bash
+ENV TERM=xterm
 ENV GOROOT=/root/.go
 ENV GOPATH=/root/go
 ENV START_AGENT_ALLOWED=true
@@ -69,10 +70,13 @@ COPY --from=build /out/worker /usr/local/bin/worker
 COPY --from=build /out/get-secrets /usr/local/bin/get-secrets
 # Doesn't dropping in a `.codex` doesn't fix EOF sdk init error.
 # COPY conductor-and-worker/worker/docker-resources/.codex/ /root/.codex/
+COPY conductor-and-worker/worker/docker-resources/inside/go.sh /usr/local/bin/go.sh
 COPY conductor-and-worker/worker/docker-resources/inside/entrypoint.sh /entrypoint.sh
 COPY conductor-and-worker/worker/docker-resources/inside/clone-repo.fish /usr/local/bin/clone-repo.fish
 
-RUN chmod +x /entrypoint.sh /usr/local/bin/clone-repo.fish
+RUN chmod +x /entrypoint.sh /usr/local/bin/clone-repo.fish /usr/local/bin/go.sh && \
+    /usr/local/bin/go.sh && \
+    go version
 
 # real
 # ENTRYPOINT ["/usr/local/bin/worker"]
