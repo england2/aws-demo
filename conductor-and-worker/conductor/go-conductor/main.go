@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	sharedproto "conductor-testing/proto"
+	atlas "go-conductor/atlas"
 	scheduler "go-conductor/go-db-scheduler"
 	util "go-conductor/util"
 
@@ -90,12 +91,12 @@ func runConductor() error {
 	dbContext := context.Background()
 
 	if *debugAlwaysNewDB {
-		createdDatabasePath, err := dbgCreateDb(dbContext, schedulerDatabasePath)
+		createdDatabasePath, err := atlas.DbgCreateDb(dbContext, schedulerDatabasePath)
 		if err != nil {
 			return fmt.Errorf("create debug scheduler database: %w", err)
 		}
 		schedulerDatabasePath = createdDatabasePath
-	} else if !doesDbMatch(dbContext, schedulerDatabasePath) {
+	} else if !atlas.IsDbCompliant(dbContext, schedulerDatabasePath) {
 		fmt.Fprintf(os.Stderr, "database is not compliant: %s\n", schedulerDatabasePath)
 		return nil
 	}

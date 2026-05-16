@@ -4,11 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	atlas "go-conductor/atlas"
 	"go-conductor/db-internal/shared"
 
 	_ "modernc.org/sqlite"
@@ -138,20 +138,9 @@ func TestRunSchedulingWithTicketMessages(t *testing.T) {
 func createEmptyTestDB(t *testing.T) string {
 	t.Helper()
 
-	schema, err := os.ReadFile(filepath.Join("..", "db-sqlc", "database.sql"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	dbPath := filepath.Join(t.TempDir(), "scheduler.sqlite")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
-	if _, err := db.Exec(string(schema)); err != nil {
-		t.Fatal(err)
+	if err := atlas.CreateConformantDatabase(context.Background(), dbPath); err != nil {
+		t.Fatalf("create conformant scheduler database: %v", err)
 	}
 	return dbPath
 }

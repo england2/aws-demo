@@ -1,4 +1,4 @@
-package main
+package atlas
 
 import (
 	"context"
@@ -14,8 +14,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-//go:embed db-sqlc/database.sql
-var expectedSchemaPath string
+//go:embed database.sql
+var expectedSchemaSQL string
 
 type databaseSchemaMismatchError struct {
 	runtimeDatabasePath string
@@ -26,9 +26,9 @@ func (err databaseSchemaMismatchError) Error() string {
 	return fmt.Sprintf("runtime database schema differs from db-sqlc/database.sql at %s:\n%s", err.runtimeDatabasePath, err.diff)
 }
 
-// doesDbMatch compares the selected runtime SQLite database against the embedded scheduler schema.
-// main_testing calls it before opening the scheduler worker; false means startup should stop before polling SQS.
-func doesDbMatch(ctx context.Context, dbPath string) bool {
+// IsDbCompliant compares the selected runtime SQLite database against the embedded scheduler schema.
+// main calls it before opening the scheduler worker; false means startup should stop before polling SQS.
+func IsDbCompliant(ctx context.Context, dbPath string) bool {
 	if err := verifyRuntimeDatabaseSchema(ctx, dbPath); err != nil {
 		fmt.Fprintf(os.Stderr, "database compliance check failed: %v\n", err)
 		return false
@@ -37,20 +37,19 @@ func doesDbMatch(ctx context.Context, dbPath string) bool {
 	return true
 }
 
-// dbgCreateDb creates a fresh sibling DB that conforms to database.sql and updates dbLocation.
+// DbgCreateDb creates a fresh sibling DB that conforms to database.sql.
 // It runs before scheduler.Open when debug_always_new_db is set, preserving the originally requested DB on disk.
-func dbgCreateDb(ctx context.Context, requestedSchedulerDatabasePath string) (string, error) {
-	newSchedulerDatabasePath, err := siblingDebugDatabasePath(requestedSchedulerDatabasePath)
+func DbgCreateDb(ctx context.Context, requestedPath string) (string, error) {
+	newDbPath, err := makeDebugDbPath(requestedPath)
 	if err != nil {
 		return "", err
 	}
-	if err := createConformantDatabaseWithAtlas(ctx, newSchedulerDatabasePath); err != nil {
+	if err := CreateConformantDatabase(ctx, newDbPath); err != nil {
 		return "", err
 	}
 
-	*dbLocation = newSchedulerDatabasePath
-	fmt.Fprintf(os.Stderr, "debug: created fresh scheduler database %s\n", newSchedulerDatabasePath)
-	return newSchedulerDatabasePath, nil
+	fmt.Fprintf(os.Stderr, "debug: created fresh scheduler database %s\n", newDbPath)
+	return newDbPath, nil
 }
 
 // verifyRuntimeDatabaseSchema materializes the expected schema, then asks Atlas for a schema diff.
@@ -103,7 +102,7 @@ func createDesiredDatabaseSnapshot(ctx context.Context) (string, func(), error) 
 	}
 	defer database.Close()
 
-	if _, err := database.ExecContext(ctx, expectedSchemaPath); err != nil {
+	if _, err := database.ExecContext(ctx, expectedSchemaSQL); err != nil {
 		cleanup()
 		return "", nil, fmt.Errorf("initialize desired database snapshot: %w", err)
 	}
@@ -111,9 +110,9 @@ func createDesiredDatabaseSnapshot(ctx context.Context) (string, func(), error) 
 	return desiredDatabasePath, cleanup, nil
 }
 
-// createConformantDatabaseWithAtlas creates an empty SQLite file and asks Atlas to apply the expected schema to it.
-// The created file is a debug-only sibling DB, so this function refuses to overwrite an existing path.
-func createConformantDatabaseWithAtlas(ctx context.Context, schedulerDatabasePath string) error {
+// CreateConformantDatabase creates an empty SQLite file with the embedded scheduler schema.
+// It is shared by main's debug DB path and scheduler tests, and it refuses to overwrite an existing path.
+func CreateConformantDatabase(ctx context.Context, schedulerDatabasePath string) error {
 	if err := os.MkdirAll(filepath.Dir(schedulerDatabasePath), 0o755); err != nil {
 		return fmt.Errorf("create debug database dir: %w", err)
 	}
@@ -126,15 +125,16 @@ func createConformantDatabaseWithAtlas(ctx context.Context, schedulerDatabasePat
 		return fmt.Errorf("close debug scheduler database %s: %w", schedulerDatabasePath, err)
 	}
 
-	desiredDatabasePath, cleanup, err := createDesiredDatabaseSnapshot(ctx)
+	database, err := sql.Open("sqlite", schedulerDatabasePath)
 	if err != nil {
-		return err
-	}
-	defer cleanup()
-
-	if err := atlasSchemaApply(ctx, schedulerDatabasePath, desiredDatabasePath); err != nil {
 		_ = os.Remove(schedulerDatabasePath)
-		return err
+		return fmt.Errorf("open debug scheduler database %s: %w", schedulerDatabasePath, err)
+	}
+	defer database.Close()
+
+	if _, err := database.ExecContext(ctx, expectedSchemaSQL); err != nil {
+		_ = os.Remove(schedulerDatabasePath)
+		return fmt.Errorf("initialize debug scheduler database %s: %w", schedulerDatabasePath, err)
 	}
 
 	return nil
@@ -218,26 +218,26 @@ func normalizeAtlasDiffOutput(output string) string {
 	return trimmedOutput
 }
 
-// siblingDebugDatabasePath chooses a timestamped SQLite path next to the requested runtime DB.
+// makeDebugDbPath chooses a timestamped SQLite path next to the requested runtime DB.
 // The original path is not modified; the caller replaces dbLocation only after Atlas creates the new file.
-func siblingDebugDatabasePath(requestedSchedulerDatabasePath string) (string, error) {
-	absoluteRequestedPath, err := filepath.Abs(requestedSchedulerDatabasePath)
+func makeDebugDbPath(requestedPath string) (string, error) {
+	RequestedAbsPath, err := filepath.Abs(requestedPath)
 	if err != nil {
-		return "", fmt.Errorf("resolve scheduler database path %s: %w", requestedSchedulerDatabasePath, err)
+		return "", fmt.Errorf("resolve scheduler database path %s: %w", requestedPath, err)
 	}
 
-	databaseDirectory := filepath.Dir(absoluteRequestedPath)
-	databaseExtension := filepath.Ext(absoluteRequestedPath)
-	if databaseExtension == "" {
-		databaseExtension = ".sqlite"
+	dbDir := filepath.Dir(RequestedAbsPath)
+	dbExtension := filepath.Ext(RequestedAbsPath)
+	if dbExtension == "" {
+		dbExtension = ".sqlite"
 	}
-	databaseName := strings.TrimSuffix(filepath.Base(absoluteRequestedPath), filepath.Ext(absoluteRequestedPath))
-	if databaseName == "" || databaseName == "." {
-		databaseName = "scheduler"
+	dbName := strings.TrimSuffix(filepath.Base(RequestedAbsPath), filepath.Ext(RequestedAbsPath))
+	if dbName == "" || dbName == "." {
+		dbName = "scheduler"
 	}
 
 	timestamp := time.Now().UTC().Format("20060102-150405.000000000")
-	return filepath.Join(databaseDirectory, fmt.Sprintf("%s-debug-%s%s", databaseName, timestamp, databaseExtension)), nil
+	return filepath.Join(dbDir, fmt.Sprintf("%s-debug-%s%s", dbName, timestamp, dbExtension)), nil
 }
 
 // sqliteDatabaseURL converts a filesystem path into an Atlas-compatible SQLite URL.
