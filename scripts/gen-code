@@ -1,0 +1,25 @@
+#!/usr/bin/env fish
+source (dirname (realpath (status filename)))/helpers.fish
+
+# This file calls protoc to generate gRPC interfaces and protobufs, and calls sqlc to generate
+# database-accessing code. It is not necessary for the CI pipeline, but rather a convenience for
+# local development.
+
+for cmd in protoc protoc-gen-go protoc-gen-go-grpc sqlc
+    if not command -q $cmd
+        echo "error: $cmd is missing or not on PATH" >&2 ; exit 1
+    end
+end
+
+# -------- protoc --------
+set proto_dir "$repo_root/conductor-and-worker/proto"
+protoc \
+    --proto_path="$proto_dir" \
+    --go_out="$proto_dir" \
+    --go_opt=paths=source_relative \
+    --go-grpc_out="$proto_dir" \
+    --go-grpc_opt=paths=source_relative \
+    "$proto_dir/sharedproto.proto"
+
+# -------- sqlc --------
+sqlc -f "$repo_root/conductor-and-worker/conductor/go-conductor/db-sqlc/sqlc.yaml" generate
