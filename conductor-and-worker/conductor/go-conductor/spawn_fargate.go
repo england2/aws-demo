@@ -13,8 +13,8 @@ import (
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 )
 
-// FargateInfrastructureConfig is the static ECS infrastructure config needed to run one task.
-type FargateInfrastructureConfig struct {
+// FargateWorkerSpawnRequest is all caller-provided state for one Fargate task spawn.
+type FargateWorkerSpawnRequest struct {
 	Region         string
 	Cluster        string
 	TaskDefinition string
@@ -22,37 +22,12 @@ type FargateInfrastructureConfig struct {
 	Subnets        []string
 	SecurityGroups []string
 	AssignPublicIP bool
-}
-
-// FargateWorkerSpawnRequest is all caller-provided state for one Fargate task spawn.
-type FargateWorkerSpawnRequest struct {
-	Infrastructure FargateInfrastructureConfig
 	Environment    map[string]string
 }
 
 // SpawnResult is the ECS task identity returned after a successful RunTask call.
 type SpawnResult struct {
 	TaskARN string
-}
-
-// buildAdhocFargateInfrastructureConfig returns the current hand-wired ECS target for worker tasks.
-// Main uses it immediately before BuildFargateSpawnRequest, keeping the static cluster/network values separate
-// from per-worker identity env vars.
-func buildAdhocFargateInfrastructureConfig() FargateInfrastructureConfig {
-	return FargateInfrastructureConfig{
-		Region:         "us-west-2",
-		Cluster:        "ecs-cluster-agent-fargate",
-		TaskDefinition: "agent-fargate",
-		ContainerName:  "agent-fargate",
-		Subnets: []string{
-			"subnet-0097cadb66a94a14c",
-			"subnet-0f27d826d1e258387",
-			"subnet-072d05b5920b46b90",
-			"subnet-01d067ffe823ca33c",
-		},
-		SecurityGroups: []string{"sg-0fd8bf9624d0cb702"},
-		AssignPublicIP: true,
-	}
 }
 
 type ecsClient interface {
@@ -84,7 +59,7 @@ func Spawn(ctx context.Context, request FargateWorkerSpawnRequest) (SpawnResult,
 		return SpawnResult{}, err
 	}
 
-	awsConfig, err := loadAWSConfig(ctx, request.Infrastructure.Region)
+	awsConfig, err := loadAWSConfig(ctx, request.Region)
 	if err != nil {
 		return SpawnResult{}, fmt.Errorf("load AWS config for Fargate spawn: %w", err)
 	}
@@ -108,17 +83,34 @@ func Spawn(ctx context.Context, request FargateWorkerSpawnRequest) (SpawnResult,
 	return SpawnResult{TaskARN: taskARN}, nil
 }
 
-// BuildFargateSpawnRequest creates the ECS spawn request for one prepared conductor worker.
-// Main calls it after prepareWorkerSpawnConfig has created WorkFilesDir, keeping worker identity visible before
-// passing the request to Spawn.
-func BuildFargateSpawnRequest(workerConfig workerSpawnConfig, fargateConfig FargateInfrastructureConfig) FargateWorkerSpawnRequest {
+// BuildFargateSpawnRequest creates the complete ECS spawn request for one prepared conductor worker.
+// Main calls it after prepareWorkerSpawnConfig has created WorkFilesDir, so worker identity and the current
+// hand-wired ECS target are bundled before the request reaches Spawn.
+func BuildFargateSpawnRequest(workerConfig workerSpawnConfig) FargateWorkerSpawnRequest {
 	environment := map[string]string{
 		"CONDUCTOR_GRPC_SERVER_ADDR": workerConfig.ConductorGrpcServerAddr,
 		"WORKER_ID":                  workerConfig.WorkerID,
 	}
 
+	fmt.Printf(
+		"[Conductor] spawning fargate worker %s for %s\n",
+		workerConfig.WorkerID,
+		workerConfig.ScheduleDecision.MessageType,
+	)
+
 	return FargateWorkerSpawnRequest{
-		Infrastructure: fargateConfig,
+		Region:         "us-west-2",
+		Cluster:        "ecs-cluster-agent-fargate",
+		TaskDefinition: "agent-fargate",
+		ContainerName:  "agent-fargate",
+		Subnets: []string{
+			"subnet-0097cadb66a94a14c",
+			"subnet-0f27d826d1e258387",
+			"subnet-072d05b5920b46b90",
+			"subnet-01d067ffe823ca33c",
+		},
+		SecurityGroups: []string{"sg-0fd8bf9624d0cb702"},
+		AssignPublicIP: true,
 		Environment:    WithDebugSSHEnvironment(environment),
 	}
 }
@@ -132,7 +124,7 @@ func BuildRunTaskInput(request FargateWorkerSpawnRequest) (*ecs.RunTaskInput, er
 	}
 
 	assignPublicIP := ecstypes.AssignPublicIpDisabled
-	if request.Infrastructure.AssignPublicIP {
+	if request.AssignPublicIP {
 		assignPublicIP = ecstypes.AssignPublicIpEnabled
 	}
 
@@ -150,8 +142,8 @@ func BuildRunTaskInput(request FargateWorkerSpawnRequest) (*ecs.RunTaskInput, er
 	}
 
 	return &ecs.RunTaskInput{
-		Cluster:        aws.String(request.Infrastructure.Cluster),
-		TaskDefinition: aws.String(request.Infrastructure.TaskDefinition),
+		Cluster:        aws.String(request.Cluster),
+		TaskDefinition: aws.String(request.TaskDefinition),
 		LaunchType:     ecstypes.LaunchTypeFargate,
 		Count:          aws.Int32(1),
 		StartedBy:      aws.String("agent-conductor"),
@@ -159,14 +151,14 @@ func BuildRunTaskInput(request FargateWorkerSpawnRequest) (*ecs.RunTaskInput, er
 		EnableExecuteCommand: true,
 		NetworkConfiguration: &ecstypes.NetworkConfiguration{
 			AwsvpcConfiguration: &ecstypes.AwsVpcConfiguration{
-				Subnets:        request.Infrastructure.Subnets,
-				SecurityGroups: request.Infrastructure.SecurityGroups,
+				Subnets:        request.Subnets,
+				SecurityGroups: request.SecurityGroups,
 				AssignPublicIp: assignPublicIP,
 			},
 		},
 		Overrides: &ecstypes.TaskOverride{
 			ContainerOverrides: []ecstypes.ContainerOverride{{
-				Name:        aws.String(request.Infrastructure.ContainerName),
+				Name:        aws.String(request.ContainerName),
 				Environment: environment,
 			}},
 		},
@@ -201,10 +193,10 @@ func WithDebugSSHEnvironment(environment map[string]string) map[string]string {
 // Spawn's AWS RunTask call.
 func validateSpawnRequest(request FargateWorkerSpawnRequest) error {
 	required := map[string]string{
-		"Region":                     request.Infrastructure.Region,
-		"Cluster":                    request.Infrastructure.Cluster,
-		"TaskDefinition":             request.Infrastructure.TaskDefinition,
-		"ContainerName":              request.Infrastructure.ContainerName,
+		"Region":                     request.Region,
+		"Cluster":                    request.Cluster,
+		"TaskDefinition":             request.TaskDefinition,
+		"ContainerName":              request.ContainerName,
 		"CONDUCTOR_GRPC_SERVER_ADDR": request.Environment["CONDUCTOR_GRPC_SERVER_ADDR"],
 		"WORKER_ID":                  request.Environment["WORKER_ID"],
 	}
@@ -215,10 +207,10 @@ func validateSpawnRequest(request FargateWorkerSpawnRequest) error {
 			missing = append(missing, name)
 		}
 	}
-	if len(request.Infrastructure.Subnets) == 0 {
+	if len(request.Subnets) == 0 {
 		missing = append(missing, "Subnets")
 	}
-	if len(request.Infrastructure.SecurityGroups) == 0 {
+	if len(request.SecurityGroups) == 0 {
 		missing = append(missing, "SecurityGroups")
 	}
 	if len(missing) > 0 {

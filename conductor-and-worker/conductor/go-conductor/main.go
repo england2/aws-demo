@@ -7,9 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"time"
 
 	sharedproto "conductor-testing/proto"
 	scheduler "go-conductor/go-db-scheduler"
@@ -306,34 +304,15 @@ func runConductor() error {
 						continue
 					}
 
-					fargateWorkerSpawnRequest := BuildFargateSpawnRequest(
-						newWorkerSpawnConfig,
-						buildAdhocFargateInfrastructureConfig(),
-					)
-					fmt.Printf(
-						"[Conductor] spawning fargate worker %s for %s\n",
-						newWorkerSpawnConfig.WorkerID,
-						scheduleDecision.MessageType,
-					)
+					fargateWorkerSpawnRequest := BuildFargateSpawnRequest(newWorkerSpawnConfig)
 
-					// Defining our spawn function.
-					spawnFunc := func(spawnContext context.Context, launchedWorkerConfig workerSpawnConfig) error {
-						spawnResult, err := Spawn(spawnContext, fargateWorkerSpawnRequest)
-						if err != nil {
-							return err
-						}
-						fmt.Printf(
-							"[Conductor] spawned fargate worker %s task=%s\n",
-							launchedWorkerConfig.WorkerID,
-							spawnResult.TaskARN,
-						)
-						return nil
-					}
+					spawnFunc := buildFargateWorkerLauncher(fargateWorkerSpawnRequest)
 
 					// Add the new worker to the registry and launch its Fargate task.
 					if err := registry.spawnWorker(
 						pollLoopContext,
 						newWorkerSpawnConfig,
+						// ai--done
 						spawnFunc,
 					); err != nil {
 						fmt.Fprintf(os.Stderr, "spawn worker %q for sqs message %q: %v\n", newWorkerSpawnConfig.WorkerID, polledSQSMessage.ExternalMessageID, err)
@@ -351,48 +330,16 @@ func runConductor() error {
 		}
 	}(pollingContext, chanPollDone)
 
-	// ============================================================
 	// Safe Shutdown Gate
-	// ============================================================
-
-	var numActiveWorkers int
-	pollStopSignaled := false
-	for {
-		time.Sleep(5 * time.Second)
-
-		shutdownOkayBytes, err := os.ReadFile(shutdownOkayPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "read shutdown file: %v\n", err)
-			continue
-		}
-
-		isShutdownOkay, err := strconv.ParseBool(strings.TrimSpace(string(shutdownOkayBytes)))
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "parse shutdown file %q: %v\n", strings.TrimSpace(string(shutdownOkayBytes)), err)
-			continue
-		}
-
-		if isShutdownOkay {
-			if !pollStopSignaled {
-				close(chanPollDone)
-				cancelPollingContext()
-				pollStopSignaled = true
-			}
-			numActiveWorkers = registry.getNumActiveWorkers()
-			fmt.Printf("SHUTDOWN_OKAY is true, waiting for %d workers to finish", numActiveWorkers)
-		} else {
-			continue
-		}
-
-		if isShutdownOkay && numActiveWorkers == 0 {
-			break
-		}
-	}
-
-	// Writes `CONDUCTOR_READY_FOR_SAFE_SHUTDOWN`, which the CI waits for before the conductor restarts.
-	safeShutdownSucceededPath := filepath.Join(runDir, "CONDUCTOR_READY_FOR_SAFE_SHUTDOWN")
-	if err := os.WriteFile(safeShutdownSucceededPath, []byte("true\n"), 0o644); err != nil {
-		return fmt.Errorf("write safe shutdown succeeded file: %w", err)
+	//
+	if err := shutdownGate(shutdownGateConfig{
+		ShutdownRequestPath:       shutdownOkayPath,
+		SafeShutdownSucceededPath: filepath.Join(runDir, "CONDUCTOR_READY_FOR_SAFE_SHUTDOWN"),
+		StopPolling:               cancelPollingContext,
+		PollDone:                  chanPollDone,
+		Registry:                  registry,
+	}); err != nil {
+		return err
 	}
 
 	return nil

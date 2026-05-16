@@ -76,10 +76,10 @@ func TestBuildFargateSpawnRequestUsesWorkerIdentityEnvironment(t *testing.T) {
 	request := BuildFargateSpawnRequest(workerSpawnConfig{
 		ConductorGrpcServerAddr: "localhost:50055",
 		WorkerID:                "worker-test",
-	}, validSpawnConfig())
+	})
 
-	if request.Infrastructure.Cluster != "ecs-cluster-agent-fargate" {
-		t.Fatalf("Cluster = %q", request.Infrastructure.Cluster)
+	if request.Cluster != "ecs-cluster-agent-fargate" {
+		t.Fatalf("Cluster = %q", request.Cluster)
 	}
 	if request.Environment["CONDUCTOR_GRPC_SERVER_ADDR"] != "localhost:50055" {
 		t.Fatalf("CONDUCTOR_GRPC_SERVER_ADDR = %q", request.Environment["CONDUCTOR_GRPC_SERVER_ADDR"])
@@ -223,16 +223,6 @@ func installSpawnTestDoubles(t *testing.T, fakeECS *fakeECSClient, wantRegion st
 // static ECS config and base worker environment setup.
 func validSpawnRequest() FargateWorkerSpawnRequest {
 	return FargateWorkerSpawnRequest{
-		Infrastructure: validSpawnConfig(),
-		Environment: map[string]string{
-			"CONDUCTOR_GRPC_SERVER_ADDR": "localhost:50055",
-			"WORKER_ID":                  "worker-test",
-		},
-	}
-}
-
-func validSpawnConfig() FargateInfrastructureConfig {
-	return FargateInfrastructureConfig{
 		Region:         "us-west-2",
 		Cluster:        "ecs-cluster-agent-fargate",
 		TaskDefinition: "agent-fargate",
@@ -240,6 +230,10 @@ func validSpawnConfig() FargateInfrastructureConfig {
 		Subnets:        []string{"subnet-1"},
 		SecurityGroups: []string{"sg-1"},
 		AssignPublicIP: true,
+		Environment: map[string]string{
+			"CONDUCTOR_GRPC_SERVER_ADDR": "localhost:50055",
+			"WORKER_ID":                  "worker-test",
+		},
 	}
 }
 
