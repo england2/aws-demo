@@ -5,7 +5,6 @@ import (
 	"fmt"
 )
 
-// ai--done
 // buildFargateWorkerLauncher adapts a prepared Fargate request to the registry launcher boundary.
 // Main builds the request before registering the worker, and the returned launcher performs the ECS
 // spawn after registry.spawnWorker records the worker identity.
@@ -24,7 +23,6 @@ func buildFargateWorkerLauncher(fargateWorkerSpawnRequest FargateWorkerSpawnRequ
 	}
 }
 
-// ai--done
 // buildLocalDockerWorkerLauncher adapts the local Docker test spawner to the same registry launcher boundary.
 // It can be passed to registry.spawnWorker in the same argument position as the Fargate launcher when main
 // needs to run workers on the conductor host for smoke testing.

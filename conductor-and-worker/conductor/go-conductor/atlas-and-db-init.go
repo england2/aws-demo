@@ -15,7 +15,7 @@ import (
 )
 
 //go:embed db-sqlc/database.sql
-var expectedSchedulerDatabaseSchemaSQL string
+var expectedSchemaPath string
 
 type databaseSchemaMismatchError struct {
 	runtimeDatabasePath string
@@ -26,10 +26,10 @@ func (err databaseSchemaMismatchError) Error() string {
 	return fmt.Sprintf("runtime database schema differs from db-sqlc/database.sql at %s:\n%s", err.runtimeDatabasePath, err.diff)
 }
 
-// checkIsDbCompliant compares the selected runtime SQLite database against the embedded scheduler schema.
+// doesDbMatch compares the selected runtime SQLite database against the embedded scheduler schema.
 // main_testing calls it before opening the scheduler worker; false means startup should stop before polling SQS.
-func checkIsDbCompliant(ctx context.Context, schedulerDatabasePath string) bool {
-	if err := verifyRuntimeDatabaseSchema(ctx, schedulerDatabasePath); err != nil {
+func doesDbMatch(ctx context.Context, dbPath string) bool {
+	if err := verifyRuntimeDatabaseSchema(ctx, dbPath); err != nil {
 		fmt.Fprintf(os.Stderr, "database compliance check failed: %v\n", err)
 		return false
 	}
@@ -37,9 +37,9 @@ func checkIsDbCompliant(ctx context.Context, schedulerDatabasePath string) bool 
 	return true
 }
 
-// debugCreateNewDbAndSetLocation creates a fresh sibling DB that conforms to database.sql and updates dbLocation.
+// dbgCreateDb creates a fresh sibling DB that conforms to database.sql and updates dbLocation.
 // It runs before scheduler.Open when debug_always_new_db is set, preserving the originally requested DB on disk.
-func debugCreateNewDbAndSetLocation(ctx context.Context, requestedSchedulerDatabasePath string) (string, error) {
+func dbgCreateDb(ctx context.Context, requestedSchedulerDatabasePath string) (string, error) {
 	newSchedulerDatabasePath, err := siblingDebugDatabasePath(requestedSchedulerDatabasePath)
 	if err != nil {
 		return "", err
@@ -103,7 +103,7 @@ func createDesiredDatabaseSnapshot(ctx context.Context) (string, func(), error) 
 	}
 	defer database.Close()
 
-	if _, err := database.ExecContext(ctx, expectedSchedulerDatabaseSchemaSQL); err != nil {
+	if _, err := database.ExecContext(ctx, expectedSchemaPath); err != nil {
 		cleanup()
 		return "", nil, fmt.Errorf("initialize desired database snapshot: %w", err)
 	}

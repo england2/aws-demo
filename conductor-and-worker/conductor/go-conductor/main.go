@@ -126,7 +126,6 @@ func conductorWorkerDialAddress() string {
 	return *serverAddr
 }
 
-// FIXME: 252 LoC in main, surely we can do better!
 func main() {
 	if err := runConductor(); err != nil {
 		fmt.Fprintf(os.Stderr, "conductor exited: %v\n", err)
@@ -171,12 +170,12 @@ func runConductor() error {
 	dbContext := context.Background()
 
 	if *debugAlwaysNewDB {
-		createdDatabasePath, err := debugCreateNewDbAndSetLocation(dbContext, schedulerDatabasePath)
+		createdDatabasePath, err := dbgCreateDb(dbContext, schedulerDatabasePath)
 		if err != nil {
 			return fmt.Errorf("create debug scheduler database: %w", err)
 		}
 		schedulerDatabasePath = createdDatabasePath
-	} else if !checkIsDbCompliant(dbContext, schedulerDatabasePath) {
+	} else if !doesDbMatch(dbContext, schedulerDatabasePath) {
 		fmt.Fprintf(os.Stderr, "database is not compliant: %s\n", schedulerDatabasePath)
 		return nil
 	}

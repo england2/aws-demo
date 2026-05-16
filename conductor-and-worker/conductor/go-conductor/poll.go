@@ -20,17 +20,10 @@ const defaultQueueURL = "https://sqs.us-west-2.amazonaws.com/204772699175/agent-
 type SQSPoller struct {
 	client                   *sqs.Client
 	queueURL                 string
+	region                   string
 	waitTimeSeconds          int32
 	visibilityTimeoutSeconds int32
-}
-
-// SQSPollerConfig describes one SQS long-polling connection.
-// Callers provide queue URL and optional runtime tuning values; defaults are filled in NewSQSPoller.
-type SQSPollerConfig struct {
-	QueueURL                 string
-	Region                   string
-	WaitTimeSeconds          int32
-	VisibilityTimeoutSeconds int32
+	// ai--done combined SQSPollerConfig into this runtime poller; NewSQSPoller fills defaults and client state.
 }
 
 // PolledSQSMessage is one received SQS delivery plus the receipt handle needed to delete it.
@@ -63,10 +56,11 @@ func (p *SQSPoller) Start(ctx context.Context) (<-chan PolledSQSMessage, <-chan 
 // It reads deploy-time env settings first, fills missing polling knobs with defaults, and delegates to
 // NewSQSPoller before main starts the receive loop.
 func NewTicketCloudWatchSQSPoller(ctx context.Context) (*SQSPoller, error) {
-	return NewSQSPoller(ctx, SQSPollerConfig{
-		QueueURL:                 getenvDefault("AGENT_OPERATION_QUEUE_URL", defaultQueueURL),
-		WaitTimeSeconds:          int32FromEnv("AGENT_OPERATION_WAIT_TIME_SECONDS", 20),
-		VisibilityTimeoutSeconds: int32FromEnv("AGENT_OPERATION_VISIBILITY_TIMEOUT_SECONDS", 60),
+	return NewSQSPoller(ctx, SQSPoller{
+		queueURL:                 getenvDefault("AGENT_OPERATION_QUEUE_URL", defaultQueueURL),
+		region:                   getenvDefault("AWS_REGION", "us-west-2"),
+		waitTimeSeconds:          int32FromEnv("AGENT_OPERATION_WAIT_TIME_SECONDS", 20),
+		visibilityTimeoutSeconds: int32FromEnv("AGENT_OPERATION_VISIBILITY_TIMEOUT_SECONDS", 60),
 	})
 }
 
@@ -107,31 +101,18 @@ func (p *SQSPoller) Poll(ctx context.Context, messages chan<- PolledSQSMessage, 
 // NewSQSPoller validates queue settings and constructs the AWS SQS client used by ReceiveMessages and DeleteMessage.
 // It is called before any polling begins, so the queue URL, region, wait time, and visibility timeout are stable
 // for the lifetime of the SQSPoller handed to main.
-func NewSQSPoller(ctx context.Context, pollerConfig SQSPollerConfig) (*SQSPoller, error) {
-	if pollerConfig.QueueURL == "" {
+func NewSQSPoller(ctx context.Context, poller SQSPoller) (*SQSPoller, error) {
+	if poller.queueURL == "" {
 		return nil, fmt.Errorf("SQS queue URL is required")
 	}
-	if pollerConfig.Region == "" {
-		pollerConfig.Region = getenvDefault("AWS_REGION", "us-west-2")
-	}
-	if pollerConfig.WaitTimeSeconds == 0 {
-		pollerConfig.WaitTimeSeconds = 20
-	}
-	if pollerConfig.VisibilityTimeoutSeconds == 0 {
-		pollerConfig.VisibilityTimeoutSeconds = 60
-	}
 
-	awsConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion(pollerConfig.Region))
+	awsConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion(poller.region))
 	if err != nil {
 		return nil, fmt.Errorf("load aws config: %w", err)
 	}
 
-	return &SQSPoller{
-		client:                   sqs.NewFromConfig(awsConfig),
-		queueURL:                 pollerConfig.QueueURL,
-		waitTimeSeconds:          pollerConfig.WaitTimeSeconds,
-		visibilityTimeoutSeconds: pollerConfig.VisibilityTimeoutSeconds,
-	}, nil
+	poller.client = sqs.NewFromConfig(awsConfig)
+	return &poller, nil
 }
 
 // ReceiveMessages performs one AWS long-poll request using this poller's established queue config.
