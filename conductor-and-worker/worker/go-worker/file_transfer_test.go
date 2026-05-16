@@ -95,7 +95,7 @@ func (stream *testUploadedFilesClientStream) Send(chunk *sharedproto.FileTransfe
 	}
 
 	stream.chunks = append(stream.chunks, &sharedproto.FileTransferChunk{
-		Worker:        chunk.GetWorker(),
+		WorkerId:      chunk.GetWorkerId(),
 		WorkerMessage: chunk.GetWorkerMessage(),
 		Content:       append([]byte(nil), chunk.GetContent()...),
 		ChunkIndex:    chunk.GetChunkIndex(),
@@ -120,9 +120,6 @@ func (stream *testUploadedFilesClientStream) CloseAndRecv() (*sharedproto.Genera
 
 func TestRequestWorkFilesExtractsReceivedChunks(t *testing.T) {
 	workerID := "worker-test-request"
-	workerIdentity := &sharedproto.WorkerIdentity{
-		WorkerId: workerID,
-	}
 	temporaryWorkerWorkFilesDestinationDir := t.TempDir()
 	originalWorkerWorkFilesDestinationDir := workerWorkFilesDestinationDir
 	workerWorkFilesDestinationDir = temporaryWorkerWorkFilesDestinationDir
@@ -140,12 +137,12 @@ func TestRequestWorkFilesExtractsReceivedChunks(t *testing.T) {
 		},
 	}
 
-	if err := requestWorkFiles(context.Background(), conductorClient, workerIdentity); err != nil {
+	if err := requestWorkFiles(context.Background(), conductorClient, workerID); err != nil {
 		t.Fatalf("request work files: %v", err)
 	}
 
-	if conductorClient.receivedFileTransferRequest.GetWorker().GetWorkerId() != workerID {
-		t.Fatalf("request worker id = %q, want %q", conductorClient.receivedFileTransferRequest.GetWorker().GetWorkerId(), workerID)
+	if conductorClient.receivedFileTransferRequest.GetWorkerId() != workerID {
+		t.Fatalf("request worker id = %q, want %q", conductorClient.receivedFileTransferRequest.GetWorkerId(), workerID)
 	}
 	expectedWorkerMessage := "requesting work files and then working..."
 	if conductorClient.receivedFileTransferRequest.GetWorkerMessage() != expectedWorkerMessage {
@@ -160,9 +157,7 @@ func TestRequestWorkFilesExtractsReceivedChunks(t *testing.T) {
 }
 
 func TestRequestWorkFilesRequiresSequentialChunks(t *testing.T) {
-	workerIdentity := &sharedproto.WorkerIdentity{
-		WorkerId: "worker-test-chunk-order",
-	}
+	workerID := "worker-test-chunk-order"
 	workFilesZipBytes := buildTestWorkFilesZipBytes(t, map[string]string{
 		"AGENT.md": "agent notes\n",
 	})
@@ -178,7 +173,7 @@ func TestRequestWorkFilesRequiresSequentialChunks(t *testing.T) {
 		},
 	}
 
-	err := requestWorkFiles(context.Background(), conductorClient, workerIdentity)
+	err := requestWorkFiles(context.Background(), conductorClient, workerID)
 	if err == nil {
 		t.Fatal("request work files should fail when first chunk index is not zero")
 	}
@@ -188,9 +183,7 @@ func TestRequestWorkFilesRequiresSequentialChunks(t *testing.T) {
 }
 
 func TestRequestWorkFilesRequiresFinalChunk(t *testing.T) {
-	workerIdentity := &sharedproto.WorkerIdentity{
-		WorkerId: "worker-test-final-chunk",
-	}
+	workerID := "worker-test-final-chunk"
 	workFilesZipBytes := buildTestWorkFilesZipBytes(t, map[string]string{
 		"AGENT.md": "agent notes\n",
 	})
@@ -206,7 +199,7 @@ func TestRequestWorkFilesRequiresFinalChunk(t *testing.T) {
 		},
 	}
 
-	err := requestWorkFiles(context.Background(), conductorClient, workerIdentity)
+	err := requestWorkFiles(context.Background(), conductorClient, workerID)
 	if err == nil {
 		t.Fatal("request work files should fail when stream ends without final chunk")
 	}
@@ -216,18 +209,16 @@ func TestRequestWorkFilesRequiresFinalChunk(t *testing.T) {
 }
 
 func TestSendCodexErrorSendsExpectedMessage(t *testing.T) {
-	workerIdentity := &sharedproto.WorkerIdentity{
-		WorkerId: "worker-test-codex-error",
-	}
+	workerID := "worker-test-codex-error"
 	conductorClient := &testWorkerEventReceiverClient{}
 
-	err := sendCodexError(context.Background(), conductorClient, workerIdentity, io.ErrUnexpectedEOF)
+	err := sendCodexError(context.Background(), conductorClient, workerID, io.ErrUnexpectedEOF)
 	if err != nil {
 		t.Fatalf("send codex error: %v", err)
 	}
 
-	if conductorClient.receivedCodexError.GetWorkerId() != workerIdentity.GetWorkerId() {
-		t.Fatalf("codex error worker id = %q, want %q", conductorClient.receivedCodexError.GetWorkerId(), workerIdentity.GetWorkerId())
+	if conductorClient.receivedCodexError.GetWorkerId() != workerID {
+		t.Fatalf("codex error worker id = %q, want %q", conductorClient.receivedCodexError.GetWorkerId(), workerID)
 	}
 	expectedWorkerMessage := "codex error: unexpected EOF"
 	if conductorClient.receivedCodexError.GetWorkerMessage() != expectedWorkerMessage {
@@ -237,9 +228,6 @@ func TestSendCodexErrorSendsExpectedMessage(t *testing.T) {
 
 func TestUploadFilesStreamsZipWithWorkerMetadataOnFirstChunk(t *testing.T) {
 	workerID := "worker-test-upload"
-	workerIdentity := &sharedproto.WorkerIdentity{
-		WorkerId: workerID,
-	}
 	temporaryWorkerWorkFilesDestinationDir := t.TempDir()
 	originalWorkerWorkFilesDestinationDir := workerWorkFilesDestinationDir
 	workerWorkFilesDestinationDir = temporaryWorkerWorkFilesDestinationDir
@@ -256,7 +244,7 @@ func TestUploadFilesStreamsZipWithWorkerMetadataOnFirstChunk(t *testing.T) {
 		uploadedFilesStream: uploadedFilesStream,
 	}
 
-	if err := uploadFiles(context.Background(), conductorClient, workerIdentity); err != nil {
+	if err := uploadFiles(context.Background(), conductorClient, workerID); err != nil {
 		t.Fatalf("upload files: %v", err)
 	}
 
@@ -264,8 +252,8 @@ func TestUploadFilesStreamsZipWithWorkerMetadataOnFirstChunk(t *testing.T) {
 		t.Fatal("upload files should send at least one chunk")
 	}
 	firstChunk := uploadedFilesStream.chunks[0]
-	if firstChunk.GetWorker().GetWorkerId() != workerID {
-		t.Fatalf("first uploaded chunk worker id = %q, want %q", firstChunk.GetWorker().GetWorkerId(), workerID)
+	if firstChunk.GetWorkerId() != workerID {
+		t.Fatalf("first uploaded chunk worker id = %q, want %q", firstChunk.GetWorkerId(), workerID)
 	}
 	expectedWorkerMessage := "uploading files"
 	if firstChunk.GetWorkerMessage() != expectedWorkerMessage {

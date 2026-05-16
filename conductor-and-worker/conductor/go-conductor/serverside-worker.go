@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	sharedproto "conductor-testing/proto"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -21,36 +20,28 @@ type workerEventRecord struct {
 	Payload    any
 }
 
-// spawnedWorker *represents* a worker that has been spawned by the conductor.
-// The mental model is basically: "We spawn a remote fargate instance, and our conductor needs to
-// track the state of that instance locally so we can manage it".
+// spawnedWorker represents a worker that has been spawned by the conductor. The mental model is
+// basically: "We spawn a remote fargate instance, and our conductor needs to track the state of
+// that instance locally so we can manage it".
 type spawnedWorker struct {
 	mu sync.Mutex
 
 	workerSpawnConfig
-	ID     string
-	Job    string
+	ID  string
+	Job string
+	// Worker state is interpreted from recorded events instead of separate booleans for each state.
 	Events []workerEventRecord
-}
-
-func (w *spawnedWorker) didHandshakeSucceed() bool {
-	// We interpet worker state by inspecting seen worker events rather than creating and fliping
-	// booleans fields in workers structs for every possible worker state.
-	return w.hasEvent(WorkerEventHandshakeSucceeded)
-}
-
-func (w *spawnedWorker) didSafelyEnd() bool {
-	return w.hasEvent(WorkerEventSafelyEnded)
 }
 
 type workerRegistry struct {
 	// workerRegistry scopes RPC messages from a unknown worker client and uses the carried
-	// worker_id to scope a worker struct in the RPC prodecure implementation.
-	// Note: while gRPC uses the verb 'register' in our code, our worker registry doesn't implement
-	// any proto-generated code, even though it is often used in the functions that do implement the
-	// generated gRPC interfaces.
+	// worker_id to scope a worker struct in the RPC prodecure implementation. Note: while gRPC uses
+	// the verb 'register' in our code, our worker registry doesn't implement any proto-generated
+	// code, even though it is always used in the methods that *do* implement the generated gRPC
+	// interfaces.
 	mu sync.Mutex
-	// This slice is a shared resource between gRPC prodecures that are executed concurrently, hence the mutex.
+	// This slice is a shared resource between gRPC prodecures that are executed concurrently, so we
+	// protect shared access using the above mutex.
 	workers []*spawnedWorker
 }
 
@@ -60,11 +51,11 @@ func newWorkerRegistry() *workerRegistry {
 	}
 }
 
-func (awr *workerRegistry) getWorker(workerID string) (*spawnedWorker, bool) {
-	awr.mu.Lock()
-	defer awr.mu.Unlock()
+func (wr *workerRegistry) getWorker(workerID string) (*spawnedWorker, bool) {
+	wr.mu.Lock()
+	defer wr.mu.Unlock()
 
-	for _, worker := range awr.workers {
+	for _, worker := range wr.workers {
 		if worker.ID == workerID {
 			return worker, true
 		}
@@ -73,11 +64,20 @@ func (awr *workerRegistry) getWorker(workerID string) (*spawnedWorker, bool) {
 	return nil, false
 }
 
-func (awr *workerRegistry) registerSpawnedWorker(conf workerSpawnConfig) (*spawnedWorker, error) {
-	awr.mu.Lock()
-	defer awr.mu.Unlock()
+func (wr *workerRegistry) getRequiredWorker(workerID string) (*spawnedWorker, error) {
+	worker, ok := wr.getWorker(workerID)
+	if !ok {
+		return nil, status.Errorf(codes.FailedPrecondition, "worker %q was not spawned by conductor", workerID)
+	}
 
-	for _, worker := range awr.workers {
+	return worker, nil
+}
+
+func (wr *workerRegistry) registerSpawnedWorker(conf workerSpawnConfig) (*spawnedWorker, error) {
+	wr.mu.Lock()
+	defer wr.mu.Unlock()
+
+	for _, worker := range wr.workers {
 		if worker.ID == conf.WorkerID {
 			return nil, fmt.Errorf("worker %q is already registered", conf.WorkerID)
 		}
@@ -87,80 +87,78 @@ func (awr *workerRegistry) registerSpawnedWorker(conf workerSpawnConfig) (*spawn
 		ID:                conf.WorkerID,
 		workerSpawnConfig: conf,
 	}
-	awr.workers = append(awr.workers, worker)
+	wr.workers = append(wr.workers, worker)
 
 	return worker, nil
 }
 
-func (awr *workerRegistry) registerWorkerHandshake(workerID string, payload any) (*spawnedWorker, error) {
-	worker, ok := awr.getWorker(workerID)
-	if !ok {
-		return nil, status.Errorf(codes.FailedPrecondition, "worker %q was not spawned by conductor", workerID)
+func (wr *workerRegistry) registerWorkerHandshake(workerID string, payload any) (*spawnedWorker, error) {
+	worker, err := wr.getRequiredWorker(workerID)
+	if err != nil {
+		return nil, err
 	}
-	if !worker.recordEventIfMissing(WorkerEventHandshakeSucceeded, payload) {
-		return nil, status.Errorf(codes.AlreadyExists, "worker %q already completed handshake", workerID)
-	}
+	worker.recordEvent(handshakeSucceeded, payload)
 
 	return worker, nil
 }
 
-func (awr *workerRegistry) registerWorkerSafelyEnded(workerID string, payload any) (*spawnedWorker, error) {
-	worker, ok := awr.getWorker(workerID)
-	if !ok {
-		return nil, status.Errorf(codes.FailedPrecondition, "worker %q was not spawned by conductor", workerID)
+func (wr *workerRegistry) registerWorkerSafelyEnded(workerID string, payload any) (*spawnedWorker, error) {
+	worker, err := wr.getRequiredWorker(workerID)
+	if err != nil {
+		return nil, err
 	}
 
-	worker.recordEvent(WorkerEventSafelyEnded, payload)
+	worker.recordEvent(safelyEnded, payload)
 
 	return worker, nil
 }
 
-func (awr *workerRegistry) recordWorkerErrorAndDeregister(workerID string, payload any) (*spawnedWorker, error) {
-	worker, ok := awr.getWorker(workerID)
-	if !ok {
-		return nil, status.Errorf(codes.FailedPrecondition, "worker %q was not spawned by conductor", workerID)
+func (wr *workerRegistry) recordWorkerErrorAndDeregister(workerID string, payload any) (*spawnedWorker, error) {
+	worker, err := wr.getRequiredWorker(workerID)
+	if err != nil {
+		return nil, err
 	}
 
-	worker.recordEvent(WorkerEventCodexError, payload)
-	if err := awr.removeWorker(workerID); err != nil {
+	worker.recordEvent(codexError, payload)
+	if err := wr.removeWorker(workerID); err != nil {
 		return nil, err
 	}
 
 	return worker, nil
 }
 
-func (awr *workerRegistry) waitFargateAndDeregister(workerID string) error {
+func (wr *workerRegistry) waitFargateAndDeregister(workerID string) error {
 	// Future production path waits for the worker's Fargate task to stop before deregistering.
-	return awr.removeWorker(workerID)
+	return wr.removeWorker(workerID)
 }
 
-func (awr *workerRegistry) removeWorker(workerID string) error {
-	awr.mu.Lock()
-	defer awr.mu.Unlock()
+func (wr *workerRegistry) removeWorker(workerID string) error {
+	wr.mu.Lock()
+	defer wr.mu.Unlock()
 
-	for workerIndex, worker := range awr.workers {
+	for workerIndex, worker := range wr.workers {
 		if worker.ID != workerID {
 			continue
 		}
 
-		if !worker.didSafelyEnd() && !worker.hasEvent(WorkerEventCodexError) && !worker.hasEvent(WorkerEventBadlyEnded) {
-			fmt.Printf("warning: removing worker %s without a %s event\n", worker.ID, WorkerEventSafelyEnded.String())
+		if !worker.hasEvent(safelyEnded) && !worker.hasEvent(codexError) && !worker.hasEvent(badlyEnded) {
+			fmt.Printf("warning: removing worker %s without a %s event\n", worker.ID, safelyEnded)
 		}
 
-		awr.workers = append(awr.workers[:workerIndex], awr.workers[workerIndex+1:]...)
+		wr.workers = append(wr.workers[:workerIndex], wr.workers[workerIndex+1:]...)
 		return nil
 	}
 
 	return status.Errorf(codes.FailedPrecondition, "worker %q was not registered", workerID)
 }
 
-func (awr *workerRegistry) getNumActiveWorkers() int {
-	awr.mu.Lock()
-	defer awr.mu.Unlock()
+func (wr *workerRegistry) getNumActiveWorkers() int {
+	wr.mu.Lock()
+	defer wr.mu.Unlock()
 
 	numActiveWorkers := 0
-	for _, worker := range awr.workers {
-		if !worker.didSafelyEnd() {
+	for _, worker := range wr.workers {
+		if !worker.hasEvent(safelyEnded) {
 			numActiveWorkers++
 		}
 	}
@@ -183,18 +181,18 @@ type workerLauncher func(context.Context, workerSpawnConfig) error
 // spawnWorker registers one prepared worker and then invokes the caller-selected launcher.
 // It must run after prepareWorkerSpawnConfig has created WorkFilesDir, because worker RPCs may request files as
 // soon as the launcher starts the remote or local worker process.
-func (awr *workerRegistry) spawnWorker(ctx context.Context, conf workerSpawnConfig, launchWorker workerLauncher) error {
-	worker, err := awr.registerSpawnedWorker(conf)
+func (wr *workerRegistry) spawnWorker(ctx context.Context, conf workerSpawnConfig, launchWorker workerLauncher) error {
+	worker, err := wr.registerSpawnedWorker(conf)
 	if err != nil {
 		return err
 	}
-	worker.recordEvent(WorkerEventSpawnStarted, workerSpawnStartedEvent{
+	worker.recordEvent(spawnStarted, workerSpawnStartedEvent{
 		Config: conf,
 	})
 
 	if err := launchWorker(ctx, conf); err != nil {
-		worker.recordEvent(WorkerEventBadlyEnded, err)
-		if removeErr := awr.removeWorker(conf.WorkerID); removeErr != nil {
+		worker.recordEvent(badlyEnded, err)
+		if removeErr := wr.removeWorker(conf.WorkerID); removeErr != nil {
 			return fmt.Errorf("launch worker %q: %w; additionally failed to remove registered worker: %v", conf.WorkerID, err, removeErr)
 		}
 		return fmt.Errorf("launch worker %q: %w", conf.WorkerID, err)
@@ -203,13 +201,12 @@ func (awr *workerRegistry) spawnWorker(ctx context.Context, conf workerSpawnConf
 	return nil
 }
 
-func workerIDFromIdentity(identity *sharedproto.WorkerIdentity) (string, error) {
-	workerID := identity.GetWorkerId()
+func validateWorkerID(workerID string) error {
 	if workerID == "" {
-		return "", status.Error(codes.InvalidArgument, "worker.worker_id is required")
+		return status.Error(codes.InvalidArgument, "worker_id is required")
 	}
 
-	return workerID, nil
+	return nil
 }
 
 func printWorkerMessage(workerID string, workerMessage string) {
@@ -221,22 +218,20 @@ func printWorkerMessage(workerID string, workerMessage string) {
 // =============================================================
 
 // Some worker events map to RPC procedures and some are unique within the conductor.
-//
-//go:generate /home/t/go/bin/stringer -type=workerEvent -linecomment serverside-worker.go
 const (
-	WorkerEventSpawnStarted           workerEvent = iota // worker_spawn_started
-	WorkerEventHandshakeSucceeded                        // worker_handshake_succeeded
-	WorkerEventHandshakeFailed                           // worker_handshake_failed
-	WorkerEventGotFilesSucceeded                         // worker_got_files_succeeded
-	WorkerEventGotFilesFailed                            // worker_got_files_failed
-	WorkerEventUploadedFilesSucceeded                    // worker_uploaded_files_succeeded
-	WorkerEventStartsTest                                // worker_starts_test
-	WorkerEventCodexError                                // worker_codex_error
-	WorkerEventSafelyEnded                               // worker_safely_ended
-	WorkerEventBadlyEnded                                // worker_badly_ended
+	spawnStarted           workerEvent = "worker_spawn_started"
+	handshakeSucceeded     workerEvent = "worker_handshake_succeeded"
+	handshakeFailed        workerEvent = "worker_handshake_failed"
+	gotFilesSucceeded      workerEvent = "worker_got_files_succeeded"
+	gotFilesFailed         workerEvent = "worker_got_files_failed"
+	uploadedFilesSucceeded workerEvent = "worker_uploaded_files_succeeded"
+	startsTest             workerEvent = "worker_starts_test"
+	codexError             workerEvent = "worker_codex_error"
+	safelyEnded            workerEvent = "worker_safely_ended"
+	badlyEnded             workerEvent = "worker_badly_ended"
 )
 
-type workerEvent int
+type workerEvent string
 
 func (w *spawnedWorker) recordEvent(kind workerEvent, payload any) {
 	w.mu.Lock()
@@ -247,25 +242,6 @@ func (w *spawnedWorker) recordEvent(kind workerEvent, payload any) {
 		ReceivedAt: time.Now(),
 		Payload:    payload,
 	})
-}
-
-func (w *spawnedWorker) recordEventIfMissing(kind workerEvent, payload any) bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	for _, event := range w.Events {
-		if event.Kind == kind {
-			return false
-		}
-	}
-
-	w.Events = append(w.Events, workerEventRecord{
-		Kind:       kind,
-		ReceivedAt: time.Now(),
-		Payload:    payload,
-	})
-
-	return true
 }
 
 func (w *spawnedWorker) getLastEvent(kind workerEvent) *workerEventRecord {

@@ -56,10 +56,9 @@ func setVars() {
 func sendCodexError(
 	ctx context.Context,
 	conductorClient sharedproto.WorkerEventReceiverServiceClient,
-	workerIdentity *sharedproto.WorkerIdentity,
+	workerID string,
 	codexErr error,
 ) error {
-	workerID := workerIdentity.GetWorkerId()
 	workerMessage := fmt.Sprintf("codex error: %v", codexErr)
 	codexErrorResponse, err := conductorClient.WorkerSendsCodexError(ctx, &sharedproto.CodexError{
 		WorkerId:      workerID,
@@ -77,10 +76,10 @@ func sendCodexError(
 func reportCodexErrorAndExit(
 	ctx context.Context,
 	conductorClient sharedproto.WorkerEventReceiverServiceClient,
-	workerIdentity *sharedproto.WorkerIdentity,
+	workerID string,
 	codexErr error,
 ) {
-	if reportErr := sendCodexError(ctx, conductorClient, workerIdentity, codexErr); reportErr != nil {
+	if reportErr := sendCodexError(ctx, conductorClient, workerID, codexErr); reportErr != nil {
 		log.Fatalf("report codex error: %v; original codex error: %v", reportErr, codexErr)
 	}
 
@@ -184,12 +183,9 @@ func main() {
 	conductorClient := sharedproto.NewWorkerEventReceiverServiceClient(conn)
 
 	grpcContext := context.Background()
-	workerIdentity := &sharedproto.WorkerIdentity{
-		WorkerId: workerID,
-	}
 
 	handshakeResponse, err := conductorClient.WorkerStartsHandshake(grpcContext, &sharedproto.Handshake{
-		Worker:        workerIdentity,
+		WorkerId:      workerID,
 		WorkerMessage: "starting handshake",
 	})
 	if err != nil {
@@ -197,7 +193,7 @@ func main() {
 	}
 	fmt.Printf("[internal %s]: conductor handshake response received: %s\n", workerID, handshakeResponse.GetWorkerMessage())
 
-	if err := requestWorkFiles(grpcContext, conductorClient, workerIdentity); err != nil {
+	if err := requestWorkFiles(grpcContext, conductorClient, workerID); err != nil {
 		log.Fatalf("request work files: %v", err)
 	}
 
@@ -217,13 +213,13 @@ func main() {
 
 	mainTaskResult, err := cdxThread.Run(codexContext, initialWorkerPrompt, nil)
 	if err != nil {
-		reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, fmt.Errorf("run initial worker prompt: %w", err))
+		reportCodexErrorAndExit(grpcContext, conductorClient, workerID, fmt.Errorf("run initial worker prompt: %w", err))
 	}
 	fmt.Println(mainTaskResult.FinalResponse)
 
 	reportResult, err := cdxThread.Run(codexContext, endingReport, nil)
 	if err != nil {
-		reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, fmt.Errorf("run ending report prompt: %w", err))
+		reportCodexErrorAndExit(grpcContext, conductorClient, workerID, fmt.Errorf("run ending report prompt: %w", err))
 	}
 	fmt.Println(reportResult.FinalResponse)
 
@@ -246,14 +242,14 @@ func main() {
 		fmt.Printf("[internal %s]: worker artifact validation failed: %s\n", workerID, strings.Join(validationErrs, "; "))
 
 		if numAttempts == wrkMaxValidationAttemps {
-			reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, buildWorkerArtifactValidationFailureError(validationErrs))
+			reportCodexErrorAndExit(grpcContext, conductorClient, workerID, buildWorkerArtifactValidationFailureError(validationErrs))
 		}
 
 		fmt.Printf("[internal %s]: running artifact correction prompt\n", workerID)
 		correctionPrompt := buildWorkerArtifactCorrectionPrompt(wkrRunPaths, validationErrs, numAttempts+1, wrkMaxValidationAttemps)
 		correctionRes, err := cdxThread.Run(codexContext, correctionPrompt, nil)
 		if err != nil {
-			reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, fmt.Errorf("run worker artifact correction prompt: %w", err))
+			reportCodexErrorAndExit(grpcContext, conductorClient, workerID, fmt.Errorf("run worker artifact correction prompt: %w", err))
 		}
 		fmt.Println(correctionRes.FinalResponse)
 	}
@@ -265,13 +261,13 @@ func main() {
 	fmt.Printf("[internal %s]: reading Codex transcript text for GitHub report\n", workerID)
 	transcriptText, err := readCodexThreadTranscriptText(codexContext, codexClient, cdxThread)
 	if err != nil {
-		reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, err)
+		reportCodexErrorAndExit(grpcContext, conductorClient, workerID, err)
 	}
 
 	fmt.Printf("[internal %s]: writing GitHub report markdown\n", workerID)
 	gitHubReportMarkdownResult, err := writeGitHubReportMarkdown(wkrRunPaths, transcriptText)
 	if err != nil {
-		reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, err)
+		reportCodexErrorAndExit(grpcContext, conductorClient, workerID, err)
 	}
 	fmt.Printf("[internal %s]: GitHub report markdown written to %s title=%q\n", workerID, gitHubReportMarkdownResult.Path, gitHubReportMarkdownResult.Title)
 
@@ -280,7 +276,7 @@ func main() {
 		fmt.Printf("[internal %s]: worker succeeded; creating GitHub pull request from %s\n", workerID, wrkCodexRes.RepoPath)
 		pullRequestCreationResult, err := createPullRequestFromWorkerRepo(codexContext, wrkCodexRes.RepoPath, gitHubReportMarkdownResult.Path, gitHubReportMarkdownResult.Title, workerID)
 		if err != nil {
-			reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, err)
+			reportCodexErrorAndExit(grpcContext, conductorClient, workerID, err)
 		}
 		fmt.Printf("[internal %s]: created pull request from branch %s:\n%s\n", workerID, pullRequestCreationResult.BranchName, pullRequestCreationResult.Output)
 		gitHubPublicationURL = pullRequestCreationResult.URL
@@ -288,7 +284,7 @@ func main() {
 		fmt.Printf("[internal %s]: worker did not request PR; creating failed-worker GitHub issue from %s\n", workerID, repoPath)
 		gitHubIssueCreationResult, err := createFailedWorkerGitHubIssue(codexContext, repoPath, gitHubReportMarkdownResult.Path, gitHubReportMarkdownResult.Title, workerID)
 		if err != nil {
-			reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, err)
+			reportCodexErrorAndExit(grpcContext, conductorClient, workerID, err)
 		}
 		fmt.Printf("[internal %s]: created failed-worker GitHub issue:\n%s\n", workerID, gitHubIssueCreationResult.Output)
 		gitHubPublicationURL = gitHubIssueCreationResult.URL
@@ -299,12 +295,12 @@ func main() {
 	workerShutdownMessage := "safely ended"
 	if gitHubPublicationURL != "" {
 		if err := writeGitHubLinkFile(wkrRunPaths, gitHubPublicationURL); err != nil {
-			reportCodexErrorAndExit(grpcContext, conductorClient, workerIdentity, err)
+			reportCodexErrorAndExit(grpcContext, conductorClient, workerID, err)
 		}
 		workerShutdownMessage = fmt.Sprintf("safely ended; github link: %s", gitHubPublicationURL)
 	}
 
-	if err := uploadFiles(grpcContext, conductorClient, workerIdentity); err != nil {
+	if err := uploadFiles(grpcContext, conductorClient, workerID); err != nil {
 		log.Fatalf("upload files: %v", err)
 	}
 
@@ -314,7 +310,7 @@ func main() {
 
 	// Now that we've finished our work, we can safely shutdown.
 	shutdownResponse, err := conductorClient.WorkerStartsShutdown(grpcContext, &sharedproto.Shutdown{
-		Worker:        workerIdentity,
+		WorkerId:      workerID,
 		WorkerMessage: workerShutdownMessage,
 	})
 	if err != nil {

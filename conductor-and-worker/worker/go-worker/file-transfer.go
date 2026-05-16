@@ -15,11 +15,10 @@ var workerWorkFilesDestinationDir = "/worker/work"
 func requestWorkFiles(
 	ctx context.Context,
 	conductorClient sharedproto.WorkerEventReceiverServiceClient,
-	workerIdentity *sharedproto.WorkerIdentity,
+	workerID string,
 ) error {
-	workerID := workerIdentity.GetWorkerId()
 	workFilesStream, err := conductorClient.WorkerRequestsWorkFiles(ctx, &sharedproto.FileTransferRequest{
-		Worker:        workerIdentity,
+		WorkerId:      workerID,
 		WorkerMessage: "requesting work files and then working...",
 	})
 	if err != nil {
@@ -54,9 +53,8 @@ func requestWorkFiles(
 func uploadFiles(
 	ctx context.Context,
 	conductorClient sharedproto.WorkerEventReceiverServiceClient,
-	workerIdentity *sharedproto.WorkerIdentity,
+	workerID string,
 ) error {
-	workerID := workerIdentity.GetWorkerId()
 	uploadedFilesZipPath := filepath.Join(os.TempDir(), workerID+"-uploaded-files.zip")
 	if err := os.Remove(uploadedFilesZipPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove old uploaded files zip: %w", err)
@@ -78,7 +76,7 @@ func uploadFiles(
 			FinalChunk: fileTransferChunk.FinalChunk,
 		}
 		if fileTransferChunk.ChunkIndex == 0 {
-			uploadedFilesChunk.Worker = workerIdentity
+			uploadedFilesChunk.WorkerId = workerID
 			uploadedFilesChunk.WorkerMessage = workerUploadMessage
 		}
 

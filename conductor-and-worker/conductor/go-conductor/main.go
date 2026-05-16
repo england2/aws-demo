@@ -14,8 +14,6 @@ import (
 	util "go-conductor/util"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 var (
@@ -24,84 +22,6 @@ var (
 	dbLocation       = flag.String("test-db-loc", "", "path to the test database file")
 	debugAlwaysNewDB = flag.Bool("debug_always_new_db", false, "create a fresh sibling scheduler database before polling")
 )
-
-type conductorServer struct {
-	// The conductor's gRPC server invokes our server-side RPC methods without giving us a
-	// convenient client identity. Each worker request carries worker_id in the protobuf payload,
-	// and the registry maps that ID to the conductor's in-memory worker representation (that is, an
-	// instance the `spawnedWorker` struct).
-	sharedproto.UnimplementedWorkerEventReceiverServiceServer
-	registry *workerRegistry
-}
-
-// =============================================================
-// gRPC Server-side procedure implementations
-// =============================================================
-//
-// These functions are handled concurrently by the conductor's gRPC server. Each request carries
-// WorkerIdentity so the handler can attach work to the conductor's in-memory representation of the
-// worker that sent it.
-//
-
-func (s *conductorServer) WorkerStartsHandshake(ctx context.Context, msg *sharedproto.Handshake) (*sharedproto.HandshakeResponse, error) {
-	workerID, err := workerIDFromIdentity(msg.GetWorker())
-	if err != nil {
-		return nil, err
-	}
-
-	worker, err := s.registry.registerWorkerHandshake(workerID, msg)
-	if err != nil {
-		return nil, err
-	}
-
-	printWorkerMessage(worker.ID, msg.GetWorkerMessage())
-
-	return &sharedproto.HandshakeResponse{
-		WorkerMessage: fmt.Sprintf("Conductor gets message: \"%s\"", msg.GetWorkerMessage()),
-	}, nil
-}
-
-func (s *conductorServer) WorkerStartsShutdown(ctx context.Context, msg *sharedproto.Shutdown) (*sharedproto.GeneralResponse, error) {
-	workerID, err := workerIDFromIdentity(msg.GetWorker())
-	if err != nil {
-		return nil, err
-	}
-
-	worker, err := s.registry.registerWorkerSafelyEnded(workerID, msg)
-	if err != nil {
-		return nil, err
-	}
-
-	printWorkerMessage(worker.ID, msg.GetWorkerMessage())
-
-	if err := s.registry.waitFargateAndDeregister(workerID); err != nil {
-		return nil, err
-	}
-
-	return &sharedproto.GeneralResponse{
-		WorkerId:      worker.ID,
-		WorkerMessage: fmt.Sprintf("Conductor gets message: \"%s\"", msg.GetWorkerMessage()),
-	}, nil
-}
-
-func (s *conductorServer) WorkerSendsCodexError(ctx context.Context, msg *sharedproto.CodexError) (*sharedproto.GeneralResponse, error) {
-	workerID := msg.GetWorkerId()
-	if workerID == "" {
-		return nil, status.Error(codes.InvalidArgument, "worker_id is required")
-	}
-
-	worker, err := s.registry.recordWorkerErrorAndDeregister(workerID, msg)
-	if err != nil {
-		return nil, err
-	}
-
-	printWorkerMessage(worker.ID, msg.GetWorkerMessage())
-
-	return &sharedproto.GeneralResponse{
-		WorkerId:      worker.ID,
-		WorkerMessage: fmt.Sprintf("Conductor gets message: \"%s\"", msg.GetWorkerMessage()),
-	}, nil
-}
 
 // This file (`false` by default) will be flipped by a simple CI step.
 // After this file is flipped, the Conductor will not schedule any more agent jobs, and will wait for current jobs to finish.
@@ -162,7 +82,7 @@ func runConductor() error {
 	// Database Setup and Polling Setup
 	// =============================================================
 
-	schedulerDatabasePath := testSchedulerDatabasePathFromFlags()
+	schedulerDatabasePath := strings.TrimSpace(*dbLocation)
 	if schedulerDatabasePath == "" {
 		return fmt.Errorf("test-db-loc is required")
 	}
@@ -311,7 +231,6 @@ func runConductor() error {
 					if err := registry.spawnWorker(
 						pollLoopContext,
 						newWorkerSpawnConfig,
-						// ai--done
 						spawnFunc,
 					); err != nil {
 						fmt.Fprintf(os.Stderr, "spawn worker %q for sqs message %q: %v\n", newWorkerSpawnConfig.WorkerID, polledSQSMessage.ExternalMessageID, err)
@@ -330,7 +249,8 @@ func runConductor() error {
 	}(pollingContext, chanPollDone)
 
 	// Safe Shutdown Gate
-	//
+	// This keeps the program open until it's be informed by the CI that a new version of the
+	// conductor is being deployed, allowing the conductor to finish its jobs before shutdown.
 	if err := shutdownGate(shutdownGateConfig{
 		ShutdownRequestPath:       shutdownOkayPath,
 		SafeShutdownSucceededPath: filepath.Join(runDir, "CONDUCTOR_READY_FOR_SAFE_SHUTDOWN"),

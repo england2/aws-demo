@@ -23,7 +23,6 @@ type SQSPoller struct {
 	region                   string
 	waitTimeSeconds          int32
 	visibilityTimeoutSeconds int32
-	// ai--done combined SQSPollerConfig into this runtime poller; NewSQSPoller fills defaults and client state.
 }
 
 // PolledSQSMessage is one received SQS delivery plus the receipt handle needed to delete it.

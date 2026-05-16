@@ -7,12 +7,12 @@ option go_package = "conductor-testing/proto;sharedproto";
 // ---- File Transfer  -----------------------------------------
 
 message FileTransferRequest {
-  WorkerIdentity worker = 1;
+  string worker_id = 1;
   string worker_message = 2;
 }
 
 message FileTransferChunk {
-  WorkerIdentity worker = 1;
+  string worker_id = 1;
   string worker_message = 2;
   bytes content = 3;
   int64 chunk_index = 4;
@@ -20,10 +20,6 @@ message FileTransferChunk {
 }
 
 // ---- General  -----------------------------------------------
-message WorkerIdentity {
-  string worker_id = 1;
-}
-
 message GeneralResponse {
   string worker_id = 1;
   string worker_message = 2;
@@ -35,7 +31,7 @@ message CodexError {
 }
 
 message Shutdown {
-  WorkerIdentity worker = 1;
+  string worker_id = 1;
   string worker_message = 2;
 }
 
@@ -43,7 +39,7 @@ message Shutdown {
 
 // Used to ensure a worker can reach the conductor's gRPC server before it starts its job.
 message Handshake {
-  WorkerIdentity worker = 1;
+  string worker_id = 1;
   string worker_message = 2;
 }
 message HandshakeResponse {

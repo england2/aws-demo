@@ -7,8 +7,6 @@ import (
 
 	sharedproto "conductor-testing/proto"
 	sharedlib "conductor-testing/sharedlib"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 const (
@@ -21,101 +19,6 @@ const (
 	workerResourceDirectoryPerms = 0o755
 	workerTaskFilePerms          = 0o644
 )
-
-// =============================================================
-// gRPC Procedure Implementation
-// =============================================================
-
-func (s *conductorServer) WorkerRequestsWorkFiles(
-	req *sharedproto.FileTransferRequest,
-	stream sharedproto.WorkerEventReceiverService_WorkerRequestsWorkFilesServer,
-) error {
-	workerID, err := workerIDFromIdentity(req.GetWorker())
-	if err != nil {
-		return err
-	}
-
-	worker, ok := s.registry.getWorker(workerID)
-	if !ok {
-		return status.Errorf(codes.FailedPrecondition, "worker %q was not spawned by conductor", workerID)
-	}
-	if !worker.didHandshakeSucceed() {
-		return status.Errorf(codes.FailedPrecondition, "worker %q has not completed handshake", workerID)
-	}
-
-	printWorkerMessage(worker.ID, req.GetWorkerMessage())
-
-	workerZipFilePath, err := prepareWorkerWorkFilesZip(worker.RunDir, workerID, worker.WorkFilesDir)
-	if err != nil {
-		return fmt.Errorf("prepare worker work files zip: %w", err)
-	}
-
-	if err := streamWorkFilesZip(workerZipFilePath, stream); err != nil {
-		return err
-	}
-
-	worker.recordEvent(WorkerEventGotFilesSucceeded, req)
-
-	return nil
-}
-
-func (s *conductorServer) WorkerUploadsFiles(
-	stream sharedproto.WorkerEventReceiverService_WorkerUploadsFilesServer,
-) error {
-	var worker *spawnedWorker
-	var workerID string
-	var workerUploadMessage string
-
-	uploadedWorkerZipBytes, err := sharedlib.ReceiveFileTransferChunks(func() (sharedlib.FileTransferChunk, error) {
-		uploadedFilesChunk, err := stream.Recv()
-		if err != nil {
-			return sharedlib.FileTransferChunk{}, err
-		}
-
-		if worker == nil {
-			workerID, err = workerIDFromIdentity(uploadedFilesChunk.GetWorker())
-			if err != nil {
-				return sharedlib.FileTransferChunk{}, err
-			}
-
-			foundWorker, ok := s.registry.getWorker(workerID)
-			if !ok {
-				return sharedlib.FileTransferChunk{}, status.Errorf(codes.FailedPrecondition, "worker %q was not spawned by conductor", workerID)
-			}
-			if !foundWorker.didHandshakeSucceed() {
-				return sharedlib.FileTransferChunk{}, status.Errorf(codes.FailedPrecondition, "worker %q has not completed handshake", workerID)
-			}
-
-			worker = foundWorker
-			workerUploadMessage = uploadedFilesChunk.GetWorkerMessage()
-			printWorkerMessage(worker.ID, workerUploadMessage)
-		}
-
-		return sharedlib.FileTransferChunk{
-			Content:    uploadedFilesChunk.GetContent(),
-			ChunkIndex: uploadedFilesChunk.GetChunkIndex(),
-			FinalChunk: uploadedFilesChunk.GetFinalChunk(),
-		}, nil
-	})
-	if err != nil {
-		return err
-	}
-
-	if err := sharedlib.UnzipBytesToDirectory(uploadedWorkerZipBytes, uploadedWorkerFilesExtractionDir(worker.RunDir, workerID)); err != nil {
-		return fmt.Errorf("unzip uploaded worker files: %w", err)
-	}
-
-	worker.recordEvent(WorkerEventUploadedFilesSucceeded, workerUploadMessage)
-
-	return stream.SendAndClose(&sharedproto.GeneralResponse{
-		WorkerId:      worker.ID,
-		WorkerMessage: fmt.Sprintf("Conductor gets message: \"%s\"", workerUploadMessage),
-	})
-}
-
-// =============================================================
-// Serverside Helpers
-// =============================================================
 
 func streamWorkFilesZip(
 	workerZipFilePath string,

@@ -4,7 +4,7 @@ GO ?= /home/t/.go/bin/go
 
 ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 CONDUCTOR_DIR := $(ROOT)/conductor/go-conductor
-PROTO_SCRIPT := $(ROOT)/../scripts_condtesting/gen-proto
+PROTO_SCRIPT := $(ROOT)/../scripts/gen-code
 
 OUT_DIR ?= $(HOME)/bin
 CONDUCTOR_BIN ?= $(OUT_DIR)/conductor

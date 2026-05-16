@@ -3,9 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
-	"strings"
 
 	"go-conductor/db-internal/shared"
 	scheduler "go-conductor/go-db-scheduler"
@@ -56,31 +54,4 @@ func insertPolledSQSMessageAndRunScheduler(ctx context.Context, schedulerWorker 
 	}
 
 	return scheduleDecisions, nil
-}
-
-// testSchedulerDatabasePathFromFlags resolves the database path for ad hoc conductor test entry points.
-// It runs after flag.Parse and accepts either -test-db-loc or a positional path after "--", keeping the polling
-// smoke test compatible with normal Go flag parsing while still feeding scheduler.Open a single DB path string.
-func testSchedulerDatabasePathFromFlags() string {
-	return schedulerDatabasePathFromFlagValues(*dbLocation, flag.Args())
-}
-
-// schedulerDatabasePathFromFlagValues accepts both normal -test-db-loc parsing and the ad hoc "-- test-db-loc path" form.
-// The latter appears as positional args after flag.Parse, so main_testing normalizes it before opening or verifying SQLite.
-func schedulerDatabasePathFromFlagValues(configuredDatabaseLocation string, flagArguments []string) string {
-	if strings.TrimSpace(configuredDatabaseLocation) != "" {
-		return strings.TrimSpace(configuredDatabaseLocation)
-	}
-
-	if len(flagArguments) == 0 {
-		return ""
-	}
-	if len(flagArguments) >= 2 {
-		flagLikeName := strings.TrimLeft(flagArguments[0], "-")
-		if flagLikeName == "test-db-loc" || flagLikeName == "database-loc" {
-			return strings.TrimSpace(flagArguments[1])
-		}
-	}
-
-	return strings.TrimSpace(flagArguments[0])
 }
