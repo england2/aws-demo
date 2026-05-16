@@ -223,8 +223,8 @@ printf 'https://github.example/pull/1\n'
 	if err != nil {
 		t.Fatalf("create pull request: %v", err)
 	}
-	if pullRequestCreationResult.BranchName != "feature/test" {
-		t.Fatalf("branch name = %q, want feature/test", pullRequestCreationResult.BranchName)
+	if pullRequestCreationResult.BranchName != "worker/worker-test/feature/test" {
+		t.Fatalf("branch name = %q, want worker/worker-test/feature/test", pullRequestCreationResult.BranchName)
 	}
 	if pullRequestCreationResult.URL != "https://github.example/pull/1" {
 		t.Fatalf("pull request URL = %q, want fake gh URL", pullRequestCreationResult.URL)
@@ -235,10 +235,10 @@ printf 'https://github.example/pull/1\n'
 		t.Fatalf("read command log: %v", err)
 	}
 	commandLogText := string(commandLogBytes)
-	if !strings.Contains(commandLogText, "git push -u origin feature/test") {
+	if !strings.Contains(commandLogText, "git push -u origin feature/test:worker/worker-test/feature/test") {
 		t.Fatalf("command log missing git push:\n%s", commandLogText)
 	}
-	if !strings.Contains(commandLogText, "gh pr create --base main --head feature/test") {
+	if !strings.Contains(commandLogText, "gh pr create --base main --head worker/worker-test/feature/test") {
 		t.Fatalf("command log missing gh pr create:\n%s", commandLogText)
 	}
 	if !strings.Contains(commandLogText, "--body-file "+prMessagePath) {

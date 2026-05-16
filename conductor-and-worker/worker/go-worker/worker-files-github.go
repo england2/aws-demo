@@ -293,18 +293,19 @@ func createPullRequestFromWorkerRepo(
 	pullRequestTitle string,
 	workerID string,
 ) (PullRequestCreationResult, error) {
-	branchName, err := currentWorkerRepoBranchName(repoPath)
+	localBranchName, err := currentWorkerRepoBranchName(repoPath)
 	if err != nil {
 		return PullRequestCreationResult{}, err
 	}
+	remoteBranchName := workerRemoteBranchName(workerID, localBranchName)
 
-	fmt.Printf("[internal %s]: pushing worker repo branch repo=%s branch=%s\n", workerID, repoPath, branchName)
-	if _, err := runWorkerRepoCommand(ctx, repoPath, "git", "push", "-u", "origin", branchName); err != nil {
+	fmt.Printf("[internal %s]: pushing worker repo branch repo=%s local_branch=%s remote_branch=%s\n", workerID, repoPath, localBranchName, remoteBranchName)
+	if _, err := runWorkerRepoCommand(ctx, repoPath, "git", "push", "-u", "origin", localBranchName+":"+remoteBranchName); err != nil {
 		return PullRequestCreationResult{}, err
 	}
 
-	fmt.Printf("[internal %s]: creating GitHub pull request base=main head=%s title=%q body_file=%s\n", workerID, branchName, pullRequestTitle, prMessagePath)
-	pullRequestOutput, err := runWorkerRepoCommand(ctx, repoPath, "gh", "pr", "create", "--base", "main", "--head", branchName, "--title", pullRequestTitle, "--body-file", prMessagePath)
+	fmt.Printf("[internal %s]: creating GitHub pull request base=main head=%s title=%q body_file=%s\n", workerID, remoteBranchName, pullRequestTitle, prMessagePath)
+	pullRequestOutput, err := runWorkerRepoCommand(ctx, repoPath, "gh", "pr", "create", "--base", "main", "--head", remoteBranchName, "--title", pullRequestTitle, "--body-file", prMessagePath)
 	if err != nil {
 		return PullRequestCreationResult{}, err
 	}
@@ -314,10 +315,14 @@ func createPullRequestFromWorkerRepo(
 	}
 
 	return PullRequestCreationResult{
-		BranchName: branchName,
+		BranchName: remoteBranchName,
 		URL:        pullRequestURL,
 		Output:     string(pullRequestOutput),
 	}, nil
+}
+
+func workerRemoteBranchName(workerID string, localBranchName string) string {
+	return "worker/" + workerID + "/" + localBranchName
 }
 
 func createFailedWorkerGitHubIssue(
