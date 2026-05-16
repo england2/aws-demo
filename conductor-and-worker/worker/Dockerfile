@@ -16,6 +16,7 @@ RUN go mod download
 COPY conductor-and-worker/worker/go-worker/ ./
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/worker .
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/get-secrets ./cmd/get-secrets
+RUN GOBIN=/out CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go install github.com/benhoyt/goawk@v1.31.0
 
 # ==============================================================
 # runtime stage
@@ -68,6 +69,7 @@ RUN npm install -g @openai/codex@0.128.0
 
 COPY --from=build /out/worker /usr/local/bin/worker
 COPY --from=build /out/get-secrets /usr/local/bin/get-secrets
+COPY --from=build /out/goawk /usr/local/bin/goawk
 # Doesn't dropping in a `.codex` doesn't fix EOF sdk init error.
 # COPY conductor-and-worker/worker/docker-resources/.codex/ /root/.codex/
 COPY conductor-and-worker/worker/docker-resources/inside/go.sh /usr/local/bin/go.sh

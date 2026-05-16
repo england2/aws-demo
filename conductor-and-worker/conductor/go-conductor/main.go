@@ -227,7 +227,7 @@ func runConductor() error {
 	// Poll loop
 	// =============================================================
 
-	messages, pollErrors := sqsPoller.Start(pollingContext)
+	chanSQS, chanSQSError := sqsPoller.Start(pollingContext)
 
 	fmt.Printf("polling SQS queue with scheduler DB %s\n", schedulerDatabasePath)
 
@@ -243,7 +243,7 @@ func runConductor() error {
 				return
 			case <-pollLoopContext.Done():
 				return
-			case polledSQSMessage, ok := <-messages:
+			case polledSQSMessage, ok := <-chanSQS:
 				if !ok {
 					return
 				}
@@ -319,9 +319,9 @@ func runConductor() error {
 					}
 				}
 
-			case err, ok := <-pollErrors:
+			case err, ok := <-chanSQSError:
 				if !ok {
-					pollErrors = nil
+					chanSQSError = nil
 					continue
 				}
 				fmt.Fprintf(os.Stderr, "poll sqs: %v\n", err)

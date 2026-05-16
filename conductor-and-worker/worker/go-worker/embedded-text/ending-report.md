@@ -38,11 +38,9 @@ Positive outcomes may be mentioned, but the report should prioritize headaches, 
 
 Use the exact report structure below. Keep the headings exactly as written.
 
-The very first line of `/worker/work/agent-meta/ending-report.md` must be a concise plain-text GitHub title. This first line will be used as the pull request or failure issue title and will be removed from the rendered report body. Do not prefix it with `#`, `Title:`, or any other label. Keep it under 120 characters.
+Write discrete metadata to `/worker/work/agent-meta/meta-info.txt`, one item per line. Line 1 must be the concise plain-text GitHub pull request or failure issue title. Do not prefix it with `#`, `Title:`, or any other label. Keep line 1 under 120 characters.
 
 ```markdown
-Concise PR or issue title goes here
-
 ## Agent's Job Understanding
 
 State your high-level understanding of the user's requested task in 2-5 sentences.
@@ -214,5 +212,7 @@ The report command is the final action before shutdown. The report must capture 
 # Output 
 
 Place your report in /worker/work/agent-meta/ending-report.md
+
+Place metadata in /worker/work/agent-meta/meta-info.txt
 
 Before finishing, confirm that /worker/work/agent-meta/WAS_JOB_SUCCESSFUL accurately contains `true` or `false`.

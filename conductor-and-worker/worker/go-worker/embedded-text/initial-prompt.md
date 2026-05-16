@@ -32,11 +32,19 @@ Before the worker exits, write this file:
 
 Write `true` only when the work is complete, committed on a feature branch, and ready for pull request creation. Write `false` when the task failed, was blocked, was not attempted, or should not produce a pull request.
 
+Also write this file before the worker exits:
+
+```text
+/worker/work/agent-meta/meta-info.txt
+```
+
+Put discrete worker metadata in this file, one item per line. Line 1 must be the concise plain-text GitHub pull request or failure issue title. Do not prefix it with `#`, `Title:`, or any other label. Keep line 1 under 120 characters.
+
 # Pull Request Protocol
 
 Do not create a pull request yourself. Do not run `gh pr create`, `gh issue create`, or any other GitHub publication command unless the worker prompt explicitly tells you to do so later.
 
-The worker process will generate the pull request or failure issue after you finish. It does that from the repository, branch, commit, success marker, report, and transcript files you leave behind. Your job is to place the files in the required paths, commit the intended code changes, and write the success marker accurately.
+The worker process will generate the pull request or failure issue after you finish. It does that from the repository, branch, commit, success marker, metadata, report, and transcript files you leave behind. Your job is to place the files in the required paths, commit the intended code changes, and write the success marker accurately.
 
 # Git Protocol
 

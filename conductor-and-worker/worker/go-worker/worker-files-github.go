@@ -16,6 +16,7 @@ type WorkerRuntimePaths struct {
 	RepoRootDir      string
 	AgentMetaDir     string
 	JobSuccessPath   string
+	MetaInfoPath     string
 	EndingReportPath string
 	PRMessagePath    string
 	GitHubLinkPath   string
@@ -50,6 +51,7 @@ func defaultWorkerRuntimePaths() WorkerRuntimePaths {
 		RepoRootDir:      filepath.Join(workerWorkFilesDestinationDir, "repo"),
 		AgentMetaDir:     workerAgentMetaDir,
 		JobSuccessPath:   filepath.Join(workerAgentMetaDir, "WAS_JOB_SUCCESSFUL"),
+		MetaInfoPath:     filepath.Join(workerAgentMetaDir, "meta-info.txt"),
 		EndingReportPath: filepath.Join(workerAgentMetaDir, "ending-report.md"),
 		PRMessagePath:    filepath.Join(workerAgentMetaDir, "pr-message.md"),
 		GitHubLinkPath:   filepath.Join(workerAgentMetaDir, "GHLINK"),
@@ -248,7 +250,15 @@ func writeGitHubReportMarkdown(workerRuntimePaths WorkerRuntimePaths, transcript
 		return GitHubReportMarkdownResult{}, fmt.Errorf("read ending report for GitHub body: %w", err)
 	}
 
-	gitHubTitle, endingReportMarkdown := splitEndingReportTitleAndBody(strings.TrimSpace(string(endingReportBytes)), "Agent work report")
+	gitHubTitleBytes, err := exec.Command("goawk", "NR == 1 { print; exit }", workerRuntimePaths.MetaInfoPath).CombinedOutput()
+	if err != nil {
+		return GitHubReportMarkdownResult{}, fmt.Errorf("read GitHub title from worker meta info %q with goawk: %w\n%s", workerRuntimePaths.MetaInfoPath, err, string(gitHubTitleBytes))
+	}
+	gitHubTitle := strings.TrimSpace(string(gitHubTitleBytes))
+	if gitHubTitle == "" {
+		return GitHubReportMarkdownResult{}, fmt.Errorf("GitHub title in worker meta info %q is empty", workerRuntimePaths.MetaInfoPath)
+	}
+	endingReportMarkdown := strings.TrimSpace(string(endingReportBytes))
 
 	gitHubReportMarkdown := fmt.Sprintf(`# Agent Work Report
 
@@ -274,23 +284,6 @@ func writeGitHubReportMarkdown(workerRuntimePaths WorkerRuntimePaths, transcript
 		Path:  workerRuntimePaths.PRMessagePath,
 		Title: gitHubTitle,
 	}, nil
-}
-
-func splitEndingReportTitleAndBody(reportMarkdown string, fallbackTitle string) (string, string) {
-	reportLines := strings.Split(reportMarkdown, "\n")
-	if len(reportLines) == 0 {
-		return fallbackTitle, reportMarkdown
-	}
-
-	title := strings.TrimSpace(reportLines[0])
-	if title == "" {
-		title = fallbackTitle
-	}
-	if len(title) > 120 {
-		title = title[:120]
-	}
-
-	return title, strings.TrimSpace(strings.Join(reportLines[1:], "\n"))
 }
 
 func createPullRequestFromWorkerRepo(

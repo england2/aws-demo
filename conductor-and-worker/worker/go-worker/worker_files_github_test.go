@@ -110,7 +110,10 @@ func TestValidateSuccessfulWorkerArtifactsRejectsUncommittedWorktree(t *testing.
 // counter-factural confirmed
 func TestWriteGitHubReportMarkdownIncludesReportAndTranscriptDetails(t *testing.T) {
 	workerRuntimePaths := testWorkerRuntimePaths(t)
-	reportMarkdown := "Fix number-adder CLI args\n\n## Agent's Job Understanding\n\nOutcome: Succeeded.\n"
+	if err := os.WriteFile(workerRuntimePaths.MetaInfoPath, []byte("Fix number-adder CLI args\n"), 0o644); err != nil {
+		t.Fatalf("write meta info: %v", err)
+	}
+	reportMarkdown := "## Agent's Job Understanding\n\nOutcome: Succeeded.\n"
 	if err := os.WriteFile(workerRuntimePaths.EndingReportPath, []byte(reportMarkdown), 0o644); err != nil {
 		t.Fatalf("write ending report: %v", err)
 	}
@@ -150,7 +153,7 @@ func TestWriteGitHubReportMarkdownIncludesReportAndTranscriptDetails(t *testing.
 		t.Fatalf("GitHub report markdown repeats final report headings:\n%s", gitHubReportText)
 	}
 	if strings.Contains(gitHubReportText, "Fix number-adder CLI args") {
-		t.Fatalf("GitHub report markdown should not render first-line title:\n%s", gitHubReportText)
+		t.Fatalf("GitHub report markdown should not render meta info title:\n%s", gitHubReportText)
 	}
 	if !strings.Contains(gitHubReportText, "Outcome: Succeeded.\n\n## Full Agent Transcript\n\n<details>") {
 		t.Fatalf("GitHub transcript details should be under its own heading:\n%s", gitHubReportText)
@@ -308,6 +311,7 @@ func testWorkerRuntimePaths(t *testing.T) WorkerRuntimePaths {
 		RepoRootDir:      filepath.Join(workDir, "repo"),
 		AgentMetaDir:     filepath.Join(workDir, "agent-meta"),
 		JobSuccessPath:   filepath.Join(workDir, "agent-meta", "WAS_JOB_SUCCESSFUL"),
+		MetaInfoPath:     filepath.Join(workDir, "agent-meta", "meta-info.txt"),
 		EndingReportPath: filepath.Join(workDir, "agent-meta", "ending-report.md"),
 		PRMessagePath:    filepath.Join(workDir, "agent-meta", "pr-message.md"),
 		GitHubLinkPath:   filepath.Join(workDir, "agent-meta", "GHLINK"),
