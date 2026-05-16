@@ -1,22 +1,65 @@
-use std::env;
+use std::{env, process::ExitCode};
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
+fn main() -> ExitCode {
+    let mut args = env::args();
+    let program_name = args.next().unwrap_or_else(|| "number-adder".to_string());
+    let values: Vec<String> = args.collect();
 
-    if args.len() != 3 {
-        eprintln!("Usage: {} <num1> <num2>", args[0]);
-        std::process::exit(1);
+    if values.is_empty() {
+        print_usage(&program_name);
+        return ExitCode::FAILURE;
     }
 
-    let x: i32 = args[1]
-        .parse()
-        .expect("arg 1 must be a valid integer");
+    let numbers = match parse_numbers(&values) {
+        Ok(numbers) => numbers,
+        Err(message) => {
+            eprintln!("{message}");
+            print_usage(&program_name);
+            return ExitCode::FAILURE;
+        }
+    };
 
-    let y: i32 = args[2]
-        .parse()
-        .expect("arg 2 must be a valid integer");
+    let sum: i32 = numbers.iter().sum();
 
-    let sum = x + y;
+    println!("The sum is {sum}");
+    ExitCode::SUCCESS
+}
 
-    println!("The sum of {} and {} is {}", x, y, sum);
+fn parse_numbers(values: &[String]) -> Result<Vec<i32>, String> {
+    values
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            value
+                .parse()
+                .map_err(|_| format!("argument {} must be a valid integer: {value}", index + 1))
+        })
+        .collect()
+}
+
+fn print_usage(program_name: &str) {
+    eprintln!("Usage: {program_name} <num> [num ...]");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_numbers;
+
+    #[test]
+    fn parses_any_number_of_integers() {
+        let values = vec!["1".to_string(), "2".to_string(), "3".to_string()];
+
+        let numbers = parse_numbers(&values).expect("numbers should parse");
+
+        assert_eq!(numbers, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn reports_invalid_integer_argument() {
+        let values = vec!["1".to_string(), "nope".to_string()];
+
+        let error = parse_numbers(&values).expect_err("invalid integer should fail");
+
+        assert_eq!(error, "argument 2 must be a valid integer: nope");
+    }
 }
