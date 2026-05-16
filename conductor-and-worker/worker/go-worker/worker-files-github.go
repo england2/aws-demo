@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -20,11 +19,6 @@ type WorkerRuntimePaths struct {
 	EndingReportPath string
 	PRMessagePath    string
 	GitHubLinkPath   string
-}
-
-type WorkerArtifactValidationResult struct {
-	RepoPath string
-	Errors   []string
 }
 
 type PullRequestCreationResult struct {
@@ -84,22 +78,25 @@ func readWorkerJobSuccessMarker(workerRuntimePaths WorkerRuntimePaths) (bool, er
 	return false, fmt.Errorf("parse worker success marker %q value %q: expected exactly true or false", workerRuntimePaths.JobSuccessPath, workerJobSuccessText)
 }
 
-func validateSuccessfulWorkerArtifacts(workerRuntimePaths WorkerRuntimePaths) WorkerArtifactValidationResult {
-	validationResult := WorkerArtifactValidationResult{}
+func validateSuccessfulWorkerArtifacts(workerRuntimePaths WorkerRuntimePaths) (string, error) {
+	var repoPath string
+	var validationErrors []error
 
-	repoPath, err := findSingleWorkerGitRepo(workerRuntimePaths.RepoRootDir)
+	foundRepoPath, err := findSingleWorkerGitRepo(workerRuntimePaths.RepoRootDir)
 	if err != nil {
-		validationResult.Errors = append(validationResult.Errors, err.Error())
+		validationErrors = append(validationErrors, err)
 	} else {
-		validationResult.RepoPath = repoPath
-		validationResult.Errors = append(validationResult.Errors, validateSuccessfulWorkerGitRepo(repoPath)...)
+		repoPath = foundRepoPath
+		if err := validateSuccessfulWorkerGitRepo(repoPath); err != nil {
+			validationErrors = append(validationErrors, err)
+		}
 	}
 
 	if err := validateEndingReportFile(workerRuntimePaths.EndingReportPath); err != nil {
-		validationResult.Errors = append(validationResult.Errors, err.Error())
+		validationErrors = append(validationErrors, err)
 	}
 
-	return validationResult
+	return repoPath, errors.Join(validationErrors...)
 }
 
 func findSingleWorkerGitRepo(repoRootDir string) (string, error) {
@@ -149,28 +146,27 @@ func isGitRepositoryDirectory(candidateRepoPath string) bool {
 	return strings.TrimSpace(string(gitCommandOutput)) == "true"
 }
 
-func validateSuccessfulWorkerGitRepo(repoPath string) []string {
-	validationErrors := []string{}
-
+func validateSuccessfulWorkerGitRepo(repoPath string) error {
 	branchName, err := currentWorkerRepoBranchName(repoPath)
 	if err != nil {
-		return append(validationErrors, err.Error())
+		return err
 	}
+	var validationErrors []error
 	if branchName == "main" || branchName == "master" {
-		validationErrors = append(validationErrors, fmt.Sprintf("repo %q must be on a feature branch, not %q", repoPath, branchName))
+		validationErrors = append(validationErrors, fmt.Errorf("repo %q must be on a feature branch, not %q", repoPath, branchName))
 	}
 	if err := validateWorkerRepoCleanWorktree(repoPath); err != nil {
-		validationErrors = append(validationErrors, err.Error())
+		validationErrors = append(validationErrors, err)
 	}
 
 	hasBranchDelta, err := workerRepoHasCommittedDeltaFromMain(repoPath)
 	if err != nil {
-		validationErrors = append(validationErrors, err.Error())
+		validationErrors = append(validationErrors, err)
 	} else if !hasBranchDelta {
-		validationErrors = append(validationErrors, fmt.Sprintf("repo %q has no committed branch delta relative to main", repoPath))
+		validationErrors = append(validationErrors, fmt.Errorf("repo %q has no committed branch delta relative to main", repoPath))
 	}
 
-	return validationErrors
+	return errors.Join(validationErrors...)
 }
 
 func validateWorkerRepoCleanWorktree(repoPath string) error {
@@ -377,13 +373,10 @@ func runWorkerRepoCommand(ctx context.Context, repoPath string, commandName stri
 	repoCommand := exec.CommandContext(ctx, commandName, commandArgs...)
 	repoCommand.Dir = repoPath
 
-	var repoCommandOutput bytes.Buffer
-	repoCommand.Stdout = &repoCommandOutput
-	repoCommand.Stderr = &repoCommandOutput
-
-	if err := repoCommand.Run(); err != nil {
-		return repoCommandOutput.Bytes(), fmt.Errorf("run %s %s in %q: %w\n%s", commandName, strings.Join(commandArgs, " "), repoPath, err, repoCommandOutput.String())
+	repoCommandOutput, err := repoCommand.CombinedOutput()
+	if err != nil {
+		return repoCommandOutput, fmt.Errorf("run %s %s in %q: %w\n%s", commandName, strings.Join(commandArgs, " "), repoPath, err, repoCommandOutput)
 	}
 
-	return repoCommandOutput.Bytes(), nil
+	return repoCommandOutput, nil
 }

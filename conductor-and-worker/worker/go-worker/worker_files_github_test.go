@@ -65,12 +65,12 @@ func TestValidateSuccessfulWorkerArtifactsAcceptsFeatureBranchWithCommittedDelta
 		t.Fatalf("write ending report: %v", err)
 	}
 
-	validationResult := validateSuccessfulWorkerArtifacts(workerRuntimePaths)
-	if len(validationResult.Errors) != 0 {
-		t.Fatalf("validation errors = %v, want none", validationResult.Errors)
+	validatedRepoPath, err := validateSuccessfulWorkerArtifacts(workerRuntimePaths)
+	if err != nil {
+		t.Fatalf("validation error = %v, want none", err)
 	}
-	if validationResult.RepoPath != repoPath {
-		t.Fatalf("repo path = %q, want %q", validationResult.RepoPath, repoPath)
+	if validatedRepoPath != repoPath {
+		t.Fatalf("repo path = %q, want %q", validatedRepoPath, repoPath)
 	}
 }
 
@@ -79,8 +79,11 @@ func TestValidateSuccessfulWorkerArtifactsRejectsMainBranchWithoutReport(t *test
 	repoPath := filepath.Join(workerRuntimePaths.RepoRootDir, "example")
 	createTestGitRepoOnMain(t, repoPath)
 
-	validationResult := validateSuccessfulWorkerArtifacts(workerRuntimePaths)
-	joinedValidationErrors := strings.Join(validationResult.Errors, "\n")
+	_, err := validateSuccessfulWorkerArtifacts(workerRuntimePaths)
+	if err == nil {
+		t.Fatal("validation error is nil, want feature branch and ending report errors")
+	}
+	joinedValidationErrors := err.Error()
 	if !strings.Contains(joinedValidationErrors, "must be on a feature branch") {
 		t.Fatalf("validation errors = %q, want feature branch error", joinedValidationErrors)
 	}
@@ -100,8 +103,11 @@ func TestValidateSuccessfulWorkerArtifactsRejectsUncommittedWorktree(t *testing.
 		t.Fatalf("write ending report: %v", err)
 	}
 
-	validationResult := validateSuccessfulWorkerArtifacts(workerRuntimePaths)
-	joinedValidationErrors := strings.Join(validationResult.Errors, "\n")
+	_, err := validateSuccessfulWorkerArtifacts(workerRuntimePaths)
+	if err == nil {
+		t.Fatal("validation error is nil, want uncommitted worktree error")
+	}
+	joinedValidationErrors := err.Error()
 	if !strings.Contains(joinedValidationErrors, "uncommitted worktree changes") {
 		t.Fatalf("validation errors = %q, want uncommitted worktree error", joinedValidationErrors)
 	}
@@ -124,7 +130,7 @@ func TestWriteGitHubReportMarkdownIncludesReportAndTranscriptDetails(t *testing.
 		t.Fatalf("write GitHub report markdown: %v", err)
 	}
 	if gitHubReportMarkdownResult.Title != "Fix number-adder CLI args" {
-		t.Fatalf("GitHub report title = %q, want first ending report line", gitHubReportMarkdownResult.Title)
+		t.Fatalf("GitHub report title = %q, want first meta-info line", gitHubReportMarkdownResult.Title)
 	}
 
 	gitHubReportBytes, err := os.ReadFile(gitHubReportMarkdownResult.Path)

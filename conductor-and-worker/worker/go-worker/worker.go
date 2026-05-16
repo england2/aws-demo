@@ -7,7 +7,6 @@ import (
 	"log"
 	"log/slog"
 	"os"
-	"strings"
 
 	sharedproto "conductor-testing/proto"
 
@@ -227,9 +226,9 @@ func main() {
 	for numAttempts := 1; numAttempts <= wrkMaxValidationAttemps; numAttempts++ {
 		fmt.Printf("[internal %s]: validating worker artifacts attempt %d/%d\n", workerID, numAttempts, wrkMaxValidationAttemps)
 
-		var validationErrs []string
-		wrkCodexRes, validationErrs = validateWorkerCodexArtifacts(wkrRunPaths)
-		if len(validationErrs) == 0 {
+		var validationErr error
+		wrkCodexRes, validationErr = validateWorkerCodexArtifacts(wkrRunPaths)
+		if validationErr == nil {
 			fmt.Printf(
 				"[internal %s]: worker artifact validation passed should_create_pull_request=%t repo_path=%q\n",
 				workerID,
@@ -239,14 +238,14 @@ func main() {
 			break
 		}
 
-		fmt.Printf("[internal %s]: worker artifact validation failed: %s\n", workerID, strings.Join(validationErrs, "; "))
+		fmt.Printf("[internal %s]: worker artifact validation failed: %s\n", workerID, formatValidationErrorForLog(validationErr))
 
 		if numAttempts == wrkMaxValidationAttemps {
-			reportCodexErrorAndExit(grpcContext, conductorClient, workerID, buildWorkerArtifactValidationFailureError(validationErrs))
+			reportCodexErrorAndExit(grpcContext, conductorClient, workerID, buildWorkerArtifactValidationFailureError(validationErr))
 		}
 
 		fmt.Printf("[internal %s]: running artifact correction prompt\n", workerID)
-		correctionPrompt := buildWorkerArtifactCorrectionPrompt(wkrRunPaths, validationErrs, numAttempts+1, wrkMaxValidationAttemps)
+		correctionPrompt := buildWorkerArtifactCorrectionPrompt(wkrRunPaths, validationErr, numAttempts+1, wrkMaxValidationAttemps)
 		correctionRes, err := cdxThread.Run(codexContext, correctionPrompt, nil)
 		if err != nil {
 			reportCodexErrorAndExit(grpcContext, conductorClient, workerID, fmt.Errorf("run worker artifact correction prompt: %w", err))

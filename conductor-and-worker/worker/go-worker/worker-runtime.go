@@ -19,10 +19,10 @@ type WorkerCodexRunResult struct {
 
 // Worker Codex turns are run directly in main so the entrypoint shows the full worker order.
 // This function only interprets marker/artifact state and returns the next orchestration decision.
-func validateWorkerCodexArtifacts(workerRuntimePaths WorkerRuntimePaths) (WorkerCodexRunResult, []string) {
+func validateWorkerCodexArtifacts(workerRuntimePaths WorkerRuntimePaths) (WorkerCodexRunResult, error) {
 	workerJobWasSuccessful, err := readWorkerJobSuccessMarker(workerRuntimePaths)
 	if err != nil {
-		return WorkerCodexRunResult{}, []string{err.Error()}
+		return WorkerCodexRunResult{}, err
 	}
 	if !workerJobWasSuccessful {
 		return WorkerCodexRunResult{
@@ -30,24 +30,24 @@ func validateWorkerCodexArtifacts(workerRuntimePaths WorkerRuntimePaths) (Worker
 		}, nil
 	}
 
-	validationResult := validateSuccessfulWorkerArtifacts(workerRuntimePaths)
-	if len(validationResult.Errors) != 0 {
-		return WorkerCodexRunResult{}, validationResult.Errors
+	repoPath, err := validateSuccessfulWorkerArtifacts(workerRuntimePaths)
+	if err != nil {
+		return WorkerCodexRunResult{}, err
 	}
 
 	return WorkerCodexRunResult{
 		ShouldCreatePullRequest: true,
-		RepoPath:                validationResult.RepoPath,
+		RepoPath:                repoPath,
 	}, nil
 }
 
-func buildWorkerArtifactValidationFailureError(validationErrors []string) error {
-	return fmt.Errorf("worker artifact validation failed after %d attempts: %s", wrkMaxValidationAttemps, strings.Join(validationErrors, "; "))
+func buildWorkerArtifactValidationFailureError(validationErr error) error {
+	return fmt.Errorf("worker artifact validation failed after %d attempts: %s", wrkMaxValidationAttemps, formatValidationErrorForLog(validationErr))
 }
 
 func buildWorkerArtifactCorrectionPrompt(
 	workerRuntimePaths WorkerRuntimePaths,
-	validationErrors []string,
+	validationErr error,
 	attemptNumber int,
 	maxAttemptCount int,
 ) string {
@@ -71,16 +71,35 @@ Required protocol:
 - Place exactly one Git repo under %s.
 - When successful, the repo must be on a feature branch with committed changes relative to main.
 - Write the final report to %s.
-`, attemptNumber, maxAttemptCount, formatValidationErrorsForPrompt(validationErrors), workerRuntimePaths.JobSuccessPath, workerRuntimePaths.RepoRootDir, workerRuntimePaths.EndingReportPath)
+`, attemptNumber, maxAttemptCount, formatValidationErrorForPrompt(validationErr), workerRuntimePaths.JobSuccessPath, workerRuntimePaths.RepoRootDir, workerRuntimePaths.EndingReportPath)
 }
 
-func formatValidationErrorsForPrompt(validationErrors []string) string {
-	formattedValidationErrors := make([]string, 0, len(validationErrors))
-	for _, validationError := range validationErrors {
-		formattedValidationErrors = append(formattedValidationErrors, "- "+validationError)
+func formatValidationErrorForPrompt(validationErr error) string {
+	if validationErr == nil {
+		return ""
 	}
 
-	return strings.Join(formattedValidationErrors, "\n")
+	return "- " + strings.Join(validationErrorMessages(validationErr), "\n- ")
+}
+
+func formatValidationErrorForLog(validationErr error) string {
+	return strings.Join(validationErrorMessages(validationErr), "; ")
+}
+
+func validationErrorMessages(validationErr error) []string {
+	type joinedError interface {
+		Unwrap() []error
+	}
+
+	if joinedValidationErr, ok := validationErr.(joinedError); ok {
+		validationErrorMessages := make([]string, 0, len(joinedValidationErr.Unwrap()))
+		for _, err := range joinedValidationErr.Unwrap() {
+			validationErrorMessages = append(validationErrorMessages, err.Error())
+		}
+		return validationErrorMessages
+	}
+
+	return []string{validationErr.Error()}
 }
 
 func readCodexThreadTranscriptText(
